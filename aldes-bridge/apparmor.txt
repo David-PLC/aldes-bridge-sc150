@@ -3,16 +3,23 @@
 profile aldes-bridge flags=(attach_disconnected,mediate_deleted) {
   #include <abstractions/base>
 
+  file,
+  signal (send, receive),
+
   capability net_admin,
   capability net_raw,
   capability net_bind_service,
+  capability dac_override,
 
   network inet stream,
   network inet dgram,
   network inet6 stream,
   network inet6 dgram,
   network netlink raw,
+  network unix stream,
+  network unix dgram,
 
+  / r,
   /run.sh rix,
   /bin/** rix,
   /usr/bin/** rix,
@@ -20,15 +27,23 @@ profile aldes-bridge flags=(attach_disconnected,mediate_deleted) {
   /usr/sbin/** rix,
   /sbin/** rix,
 
+  /app/ r,
   /app/** r,
   /etc/** r,
+  /usr/** r,
   /usr/lib/** rm,
   /usr/local/lib/** rm,
   /lib/** rm,
-  /proc/net/** r,
-  /sys/module/** r,
+  /proc/** r,
+  /sys/** r,
+  /dev/** rwk,
 
-  /data/** rw,
-  /config/** rw,
+  /data/ r,
+  /data/** rwk,
+  /config/ r,
+  /config/** rwk,
+  /tmp/ r,
   /tmp/** rwk,
+  /run/ r,
+  /run/** rwk,
 }
