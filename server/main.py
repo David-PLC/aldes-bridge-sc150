@@ -117,8 +117,8 @@ def build_parser():
                     help="retention de l'historique en jours (défaut %d)" % DEFAULT_HISTORY_DAYS)
     ap.add_argument("--no-history-backfill", action="store_true",
                     help="ne pas rejouer le log persistant dans l'historique au demarrage")
-    ap.add_argument("--profile", default=os.environ.get("ALDES_PROFILE", None),
-                    help="ID du profil device (defaut: tone-aquaair ou le premier disponible)")
+    ap.add_argument("--profile", default=os.environ.get("ALDES_PROFILE", "inspirair-sc150"),
+                    help="ID du profil device (defaut: inspirair-sc150)")
     ap.add_argument("--profile-file", default=os.environ.get("ALDES_PROFILE_FILE", DEFAULT_PROFILE_FILE),
                     help="fichier de persistance du profil (survit au redemarrage)")
     ap.add_argument("--config-file", default=os.environ.get("ALDES_CONFIG_FILE", DEFAULT_CONFIG_FILE),

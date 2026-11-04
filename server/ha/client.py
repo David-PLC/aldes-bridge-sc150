@@ -1,673 +1,623 @@
-"""Client MQTT pour la discovery HA et le publishing des données PAC."""
+"""Construction des configs HA auto-discovery pour PAC et VMC Aldes."""
 import json
 import logging
-import os
-import socket
-import struct
-import threading
-import time
-from datetime import datetime, timezone
 
-from .. import mqtt
-from ..appstate import emit_message
-from ..utils import iso, safe_float
+from ..utils import safe_float
 from .mode_mappings import (
-    ALDES_TO_HA_MODE, HA_MODE_TO_ALDES,
-    ALDES_TO_HA_PRESET, HA_PRESET_TO_ALDES,
-    ALDES_WATER_TO_HA, HA_WATER_TO_ALDES,
-    profile_code_for_label, profile_label_for_code,
+    ALDES_TO_HA_PRESET, ALDES_WATER_TO_HA,
+    profile_mode_labels,
 )
-from .discovery_config import build_discovery_config, detect_active_zones
 
 _log = logging.getLogger("aldes-ha-discovery")
 
+_AIR_MODE_CODES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
+_COOLING_CODES = frozenset({"F", "G", "H", "I"})
+_HEATING_CODES = frozenset({"B", "C", "D", "E"})
 
-class HADiscoveryClient(threading.Thread):
-    """Client MQTT qui connecte au broker local pour publier la decouverte HA.
+VMC_PRESET_MODES = [
+    "Quotidiano (V)",
+    "Modalità X",
+    "Modalità Y",
+    "Vacanze (W)",
+    "Programmazione (Z)",
+]
 
-    Thread daemon qui maintient la connexion et repond aux commandes HA.
-    """
 
-    KEEPALIVE = 30
-    PUBLISH_INTERVAL = 60
-
-    def __init__(self, state, host="127.0.0.1", port=1883, username=None, password=None, prefix="aldes", dry_run=True, zones_file=None):
-        super().__init__(daemon=True, name="ha-discovery")
-        self.state = state
-        self.host = host
-        self.port = port
-        self.username = username
-        self.password = password
-        self.prefix = prefix
-        self.dry_run = dry_run
-        self._stop = threading.Event()
-        self._sock = None
-        self._send_lock = threading.Lock()
-        self._pkt = 0
-        self._device_id = "aldes_bridge"
-        self._last_mode = None
-        self._zones_file = zones_file
-        self._last_active_zones = self._load_zones()
-        if dry_run:
-            _log.warning("ha-discovery: *** DRY-RUN active *** les commandes HA ne seront PAS envoyees a la box")
-            _log.warning("ha-discovery: pour activer, passez HA_MQTT_DRY_RUN=false ou --ha-mqtt-no-dry-run")
-
-    def _load_zones(self):
-        if not self._zones_file:
-            return []
-        try:
-            with open(self._zones_file, "r") as f:
-                data = json.load(f)
-                return data if isinstance(data, list) else []
-        except (FileNotFoundError, json.JSONDecodeError):
-            return []
-
-    def _save_zones(self, zones):
-        if not self._zones_file:
-            return
-        try:
-            with open(self._zones_file, "w") as f:
-                json.dump(zones, f)
-        except OSError as exc:
-            _log.warning("ha-discovery: impossible de sauvegarder les zones: %s", exc)
-
-    def stop(self):
-        self._stop.set()
-        with self._send_lock:
-            sock = self._sock
-            self._sock = None
-        if sock:
-            try:
-                sock.close()
-            except Exception:
-                pass
-
-    def run(self):
-        backoff = 1.0
-        try:
-            while not self._stop.is_set():
-                ok = self._session()
-                backoff = 1.0 if ok else min(backoff * 2, 10)
-                if not self._stop.is_set():
-                    time.sleep(backoff)
-        except Exception as exc:
-            _log.exception("ha-discovery: thread crashed: %s", exc)
-
-    def _session(self):
-        _log.info("ha-discovery: tentative connexion vers %s:%d (user=%s)",
-                  self.host, self.port, self.username or "(none)")
-        try:
-            s = socket.create_connection((self.host, self.port), timeout=6)
-            s.settimeout(self.KEEPALIVE / 3)
-        except Exception as exc:
-            _log.warning("ha-discovery: connexion impossible vers %s:%d: %s", self.host, self.port, exc)
-            return False
-
-        reader = mqtt.MQTTReader(s)
-        try:
-            s.sendall(mqtt.build_connect(
-                "aldes-ha-discovery",
-                username=self.username,
-                password=self.password,
-                keepalive=self.KEEPALIVE,
-                will_topic=f"{self.prefix}/state/available",
-                will_payload="offline",
-                will_qos=1,
-                will_retain=True,
-            ))
-            pkt = reader.read_packet()
-            if pkt is None or pkt[0] != mqtt.PT_CONNACK or (pkt[3][2] if len(pkt[3]) > 2 else -1) != 0:
-                rc = pkt[3][2] if pkt and len(pkt[3]) > 2 else -1
-                _log.warning("ha-discovery: CONNACK refuse (rc=%d) — broker=%s:%d", rc, self.host, self.port)
-                s.close()
-                return False
-            _log.info("ha-discovery: CONNACK OK — connecte a %s:%d", self.host, self.port)
-        except Exception as exc:
-            _log.warning("ha-discovery: erreur handshake: %s", exc)
-            try:
-                s.close()
-            except Exception:
-                pass
-            return False
-
-        self._sock = s
-
-        cmd_topics = [
-            (f"{self.prefix}/set/mode", 1),
-            (f"{self.prefix}/set/consigne", 1),
-            (f"{self.prefix}/set/preset", 1),
-            (f"{self.prefix}/set/ecs", 1),
-            (f"{self.prefix}/set/vacation_start", 1),
-            (f"{self.prefix}/set/vacation_end", 1),
-            (f"{self.prefix}/set/vacation_enable", 1),
-            (f"{self.prefix}/set/people", 1),
-        ]
-        for zi in range(10):
-            cmd_topics.append((f"{self.prefix}/set/zone{zi}/consigne", 1))
-        topic_list = [t for t, _ in cmd_topics]
-        _log.info("ha-discovery: souscription a %d topics: %s", len(topic_list), topic_list)
-        try:
-            s.sendall(mqtt.build_subscribe(1, cmd_topics))
-        except Exception as exc:
-            _log.warning("ha-discovery: subscribe echoue: %s", exc)
-            s.close()
-            return False
-
-        try:
-            suback = reader.read_packet()
-            if suback and suback[0] == mqtt.PT_SUBACK:
-                _log.info("ha-discovery: SUBACK recu — souscription OK")
-            else:
-                _log.warning("ha-discovery: pas de SUBACK (recu: %s)", suback)
-        except Exception as exc:
-            _log.warning("ha-discovery: erreur SUBACK: %s", exc)
-
-        self._publish_discovery()
-        self._publish_state()
-
-        _log.info("ha-discovery: connecte a %s:%d", self.host, self.port)
-
-        last_ping = time.time()
-        last_config_publish = time.time()
-        try:
-            while not self._stop.is_set():
-                try:
-                    pkt = reader.read_packet()
-                except socket.timeout:
-                    if time.time() - last_ping >= self.KEEPALIVE / 2:
-                        self._safe_send(mqtt.build_pingreq())
-                        last_ping = time.time()
-                    if time.time() - last_config_publish >= self.PUBLISH_INTERVAL:
-                        self._publish_discovery()
-                        self._publish_state()
-                        last_config_publish = time.time()
-                    continue
-                except (mqtt.MQTTError, OSError):
-                    break
-                if pkt is None:
-                    break
-                self._handle(pkt)
-        finally:
-            self._teardown()
+def is_vmc_device(profile, data):
+    """Rileva se il dispositivo o il profilo attivo è una VMC (es. InspirAIR SC150)."""
+    if profile and getattr(profile, "type", None) == "vmc":
         return True
+    if isinstance(data, dict):
+        pid = str(data.get("productid") or "")
+        if pid.endswith("_AIR") or "outside_tpt" in data or "extf_flw" in data or "current_mode" in data:
+            return True
+    return False
 
-    def _handle(self, pkt):
-        ptype, flags, body, raw = pkt
-        if ptype == mqtt.PT_PUBLISH:
-            topic, qos, pid, payload = mqtt.parse_publish_full(body, flags)
-            if isinstance(payload, bytes):
-                payload = payload.decode("utf-8", errors="replace")
-            _log.info("ha-discovery: <-- MQTT PUBLISH topic=%s payload=%s", topic, payload[:200])
-            if qos == mqtt.QOS_AT_LEAST_ONCE:
-                self._safe_send(mqtt.build_puback(pid))
-            elif qos == mqtt.QOS_EXACTLY_ONCE:
-                self._safe_send(mqtt.build_pubrec(pid))
-            self._handle_command(topic, payload)
-        elif ptype == mqtt.PT_PUBREC:
-            pid = struct.unpack_from(">H", body, 0)[0]
-            self._safe_send(mqtt.build_pubrel(pid))
-        elif ptype == mqtt.PT_SUBACK:
-            _log.info("ha-discovery: <-- MQTT SUBACK")
-        elif ptype in (mqtt.PT_PUBACK, mqtt.PT_PUBCOMP):
-            pass
-        else:
-            _log.debug("ha-discovery: packet type=%d", ptype)
 
-    def _handle_command(self, topic, payload):
-        if isinstance(payload, bytes):
-            payload = payload.decode("utf-8", errors="replace")
-        payload = payload.strip()
-        _log.info("ha-discovery: COMMANDE RECUE topic=%s payload=%s", topic, payload)
+def _air_mode_code(data):
+    raw = data.get("UAM", "") if data else ""
+    try:
+        index = int(float(raw))
+    except (TypeError, ValueError):
+        return str(raw).strip().upper()
+    if 0 <= index < len(_AIR_MODE_CODES):
+        return _AIR_MODE_CODES[index]
+    return ""
 
-        try:
-            if topic == f"{self.prefix}/set/mode":
-                self._handle_mode_command(payload)
-            elif topic == f"{self.prefix}/set/consigne":
-                self._handle_consigne_command(payload, zone=0)
-            elif topic.startswith(f"{self.prefix}/set/zone") and topic.endswith("/consigne"):
-                zone_str = topic.split("/set/zone")[1].split("/")[0]
-                try:
-                    zone = int(zone_str)
-                except ValueError:
-                    zone = 0
-                self._handle_consigne_command(payload, zone=zone)
-            elif topic == f"{self.prefix}/set/preset":
-                self._handle_preset_command(payload)
-            elif topic == f"{self.prefix}/set/ecs":
-                self._handle_ecs_command(payload)
-            elif topic == f"{self.prefix}/set/vacation_start":
-                self._handle_vacation_start_command(payload)
-            elif topic == f"{self.prefix}/set/vacation_end":
-                self._handle_vacation_end_command(payload)
-            elif topic == f"{self.prefix}/set/vacation_enable":
-                self._handle_vacation_enable_command(payload)
-            elif topic == f"{self.prefix}/set/people":
-                self._handle_people_command(payload)
-        except Exception as exc:
-            _log.warning("ha-discovery: erreur commande %s: %s", topic, exc)
 
-    def _handle_mode_command(self, payload):
-        ha_mode = payload.lower().strip()
-        aldes_code = HA_MODE_TO_ALDES.get(ha_mode)
-        if not aldes_code:
-            _log.warning("ha-discovery: mode HA inconnu: %s", ha_mode)
-            return
-        self._inject_aldes_command("changeMode", [aldes_code])
-        _log.info("ha-discovery: mode %s -> Aldes %s", ha_mode, aldes_code)
+def _filter_air_programs(clim_labels, heat_labels, air_code):
+    if air_code in _COOLING_CODES:
+        selected = clim_labels
+    elif air_code in _HEATING_CODES:
+        selected = heat_labels
+    else:
+        selected = clim_labels + heat_labels
+    return list(dict.fromkeys(selected))
 
-    def _handle_consigne_command(self, payload, zone=0):
-        try:
-            temp = float(payload)
-        except ValueError:
-            _log.warning("ha-discovery: consigne invalide: %s", payload)
-            return
-        self._inject_aldes_command(f"changeConsigneC{zone}", [str(temp)])
-        self.state.request_consigne(str(zone), temp)
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/state/zone{zone}/consigne",
-            f"{temp:.1f}", qos=1, retain=True,
-        ))
-        if zone == 0:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/consigne",
-                f"{temp:.1f}", qos=1, retain=True,
-            ))
-        _log.info("ha-discovery: consigne zone %d -> %.1f°C", zone, temp)
-        # Tracker la commande reçue de HA
-        if self.state and self.state.history is not None:
-            emit_message(self.state, "in", "PUBLISH",
-                         topic=f"{self.prefix}/set/consigne",
-                         payload={"zone": zone, "temperature": temp},
-                         source="ha", destination="box")
 
-    def _handle_preset_command(self, payload):
-        preset = payload.strip()
-        profile = getattr(self.state, "profile", None)
-        if self._last_mode == "cool":
-            fields = ["air_modes_clim", "air_modes_heat"]
-        elif self._last_mode == "heat":
-            fields = ["air_modes_heat", "air_modes_clim"]
-        else:
-            fields = ["air_modes_clim", "air_modes_heat"]
-        aldes_code = profile_code_for_label(profile, fields, preset, HA_PRESET_TO_ALDES)
-        if not aldes_code:
-            _log.warning("ha-discovery: preset inconnu: %s", preset)
-            return
-        self._inject_aldes_command("changeMode", [aldes_code])
-        _log.info("ha-discovery: preset %s -> Aldes %s", preset, aldes_code)
-
-    def _handle_ecs_command(self, payload):
-        mode = payload.strip()
-        profile = getattr(self.state, "profile", None)
-        aldes_code = profile_code_for_label(
-            profile, "water_modes", mode, HA_WATER_TO_ALDES
+def _get_min_max(data):
+    if data is None:
+        return 5, 30
+    is_cooling = _air_mode_code(data) in _COOLING_CODES
+    if is_cooling:
+        mi = safe_float(data.get("FMiST"))
+        ma = safe_float(data.get("FMaST"))
+    else:
+        mi = safe_float(data.get("CMiST"))
+        ma = safe_float(data.get("CMaST"))
+    if mi is None:
+        mi = min(
+            safe_float(data.get("CMiST")) or 5,
+            safe_float(data.get("FMiST")) or 5,
         )
-        if not aldes_code:
-            _log.warning("ha-discovery: mode ECS inconnu: %s", mode)
-            return
-        self._inject_aldes_command("changeMode", [aldes_code])
-        _log.info("ha-discovery: ECS %s -> Aldes %s", mode, aldes_code)
+    if ma is None:
+        ma = max(
+            safe_float(data.get("CMaST")) or 30,
+            safe_float(data.get("FMaST")) or 30,
+        )
+    return int(mi), int(ma)
 
-    def _handle_vacation_start_command(self, payload):
-        self._store_vacation_date("start", payload.strip())
 
-    def _handle_vacation_end_command(self, payload):
-        self._store_vacation_date("end", payload.strip())
+def detect_active_zones(data):
+    if data is None:
+        return []
+    zones = []
+    for i in range(10):
+        mt = data.get(f"MT{i}")
+        usc = data.get(f"UsC{i}")
+        if mt is not None and usc is not None:
+            try:
+                mt_val = float(mt)
+                usc_val = float(usc)
+            except (TypeError, ValueError):
+                continue
+            if mt_val == 0 and usc_val == 0:
+                continue
+            zones.append(i)
+    return zones
 
-    def _store_vacation_date(self, which, date_str):
-        if not hasattr(self, "_vacation_dates"):
-            self._vacation_dates = {}
-        self._vacation_dates[which] = date_str
-        start = self._vacation_dates.get("start")
-        end = self._vacation_dates.get("end")
-        if start and end:
-            self._send_vacation_command(start, end)
-            self._vacation_dates = {}
 
-    def _send_vacation_command(self, start_str, end_str):
-        try:
-            start_epoch = int(datetime.strptime(start_str, "%Y-%m-%d").replace(
-                tzinfo=timezone.utc).timestamp())
-            end_epoch = int(datetime.strptime(end_str, "%Y-%m-%d").replace(
-                tzinfo=timezone.utc).timestamp())
-        except ValueError:
-            _log.warning("ha-discovery: format date vacances invalide: %s / %s", start_str, end_str)
-            return
-        self._inject_aldes_command("changeVacation", [str(start_epoch), str(end_epoch)])
-        _log.info("ha-discovery: vacances %s -> %s", start_str, end_str)
+def _build_health_configs(device_id, device_info, prefix, discovery_prefix="homeassistant"):
+    configs = []
+    bridge_status_config = {
+        "name": "Aldes Bridge Status",
+        "unique_id": f"aldes_{device_id}_bridge_status",
+        "state_topic": f"{prefix}/health/status",
+        "payload_on": "degraded",
+        "payload_off": "ok",
+        "device_class": "problem",
+        "device": device_info,
+        "icon": "mdi:heart-pulse",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/bridge_status/config", json.dumps(bridge_status_config, ensure_ascii=False)))
 
-    def _handle_vacation_enable_command(self, payload):
-        enable = payload.lower().strip() == "on"
-        if enable:
-            if not hasattr(self, "_vacation_dates"):
-                self._vacation_dates = {}
-            start = self._vacation_dates.get("start")
-            end = self._vacation_dates.get("end")
-            if start and end:
-                self._send_vacation_command(start, end)
-            else:
-                _log.info("ha-discovery: vacances activee (dates non definies, utilisez les topics date)")
-        else:
-            self._inject_aldes_command("changeVacation", ["0", "0"])
-            _log.info("ha-discovery: vacances desactivees")
+    bridge_uptime_config = {
+        "name": "Aldes Bridge Uptime",
+        "unique_id": f"aldes_{device_id}_bridge_uptime",
+        "state_topic": f"{prefix}/health/uptime",
+        "unit_of_measurement": "s",
+        "device_class": "duration",
+        "device": device_info,
+        "icon": "mdi:timer-outline",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/bridge_uptime/config", json.dumps(bridge_uptime_config, ensure_ascii=False)))
 
-    def _handle_people_command(self, payload):
-        try:
-            count = int(payload)
-        except (ValueError, TypeError):
-            _log.warning("ha-discovery: people nombre invalide: %s", payload)
-            return
-        idx = max(0, min(4, count - 2))
-        self._inject_aldes_command("changePeople", [str(idx)])
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/state/people", str(idx + 2), qos=1, retain=True
-        ))
-        _log.info("ha-discovery: people -> index %d (%d personnes)", idx, idx + 2)
+    mqtt_connected_config = {
+        "name": "Aldes MQTT Connected",
+        "unique_id": f"aldes_{device_id}_mqtt_connected",
+        "state_topic": f"{prefix}/health/mqtt_connected",
+        "payload_on": "true",
+        "payload_off": "false",
+        "device_class": "connectivity",
+        "device": device_info,
+        "icon": "mdi:lan-connect",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/mqtt_connected/config", json.dumps(mqtt_connected_config, ensure_ascii=False)))
 
-    def _inject_aldes_command(self, method, params):
-        body = {
-            "id": 1,
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params if isinstance(params, list) else [params],
+    box_connected_config = {
+        "name": "Aldes Box Connected",
+        "unique_id": f"aldes_{device_id}_box_connected",
+        "state_topic": f"{prefix}/health/box_connected",
+        "payload_on": "true",
+        "payload_off": "false",
+        "device_class": "connectivity",
+        "device": device_info,
+        "icon": "mdi:router-wireless",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/box_connected/config", json.dumps(box_connected_config, ensure_ascii=False)))
+    return configs
+
+
+def build_vmc_discovery_config(device_id, profile, prefix="aldes", data=None):
+    """Costruisce la configurazione MQTT Auto-Discovery per Aldes InspirAIR Home SC150."""
+    configs = []
+    discovery_prefix = "homeassistant"
+
+    sw_ver = None
+    if isinstance(data, dict):
+        uc = data.get("Vers_UC")
+        vw = data.get("Vers_W")
+        if uc is not None or vw is not None:
+            sw_ver = f"UC {uc} / Wi-Fi {vw}"
+
+    device_info = {
+        "identifiers": [f"aldes_{device_id}"],
+        "name": profile.name if profile else "InspirAIR Home SC150",
+        "manufacturer": "Aldes",
+        "model": profile.name if profile else "InspirAIR Home SC150",
+    }
+    if sw_ver:
+        device_info["sw_version"] = sw_ver
+
+    # Rimuove eventuale entità climate residua se prima era attivo il profilo PAC
+    configs.append((f"{discovery_prefix}/climate/aldes/config", ""))
+    configs.append((f"{discovery_prefix}/water_heater/aldes_ballon/config", ""))
+
+    # 1. Entità FAN nativa di Home Assistant
+    fan_config = {
+        "name": "VMC InspirAIR SC150",
+        "unique_id": f"aldes_{device_id}_vmc_fan",
+        "device": device_info,
+        "state_topic": f"{prefix}/state/fan/state",
+        "command_topic": f"{prefix}/set/fan/state",
+        " payload_on": "ON",
+        "payload_off": "OFF",
+        "percentage_state_topic": f"{prefix}/state/fan/speed",
+        "percentage_command_topic": f"{prefix}/set/fan/speed",
+        "speed_range_min": 1,
+        "speed_range_max": 3,
+        "preset_modes": VMC_PRESET_MODES,
+        "preset_mode_state_topic": f"{prefix}/state/fan/preset",
+        "preset_mode_command_topic": f"{prefix}/set/fan/preset",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "icon": "mdi:air-Purifier",
+    }
+    # Correzione chiave senza spazio iniziale
+    fan_config.pop(" payload_on", None)
+    fan_config["payload_on"] = "ON"
+    fan_config["icon"] = "mdi:fan"
+    configs.append((
+        f"{discovery_prefix}/fan/aldes_vmc/config",
+        json.dumps(fan_config, ensure_ascii=False),
+    ))
+
+    # 2. Pulsanti (Button) per testare direttamente X, Y e tornare a V o Z
+    test_buttons = [
+        ("mode_v", "Modalità Quotidiano (Codice V)", "mdi:home-clock"),
+        ("mode_x", "Test Modalità X (Boost / Ospiti)", "mdi:fan-chevron-up"),
+        ("mode_y", "Test Modalità Y (Ospiti / Boost)", "mdi:account-multiple-plus"),
+        ("mode_z", "Modalità Programmazione (Codice Z)", "mdi:calendar-clock"),
+    ]
+    for btn_id, btn_name, btn_icon in test_buttons:
+        btn_cfg = {
+            "name": btn_name,
+            "unique_id": f"aldes_{device_id}_btn_{btn_id}",
+            "command_topic": f"{prefix}/set/button/{btn_id}",
+            "payload_press": "PRESS",
+            "device": device_info,
+            "icon": btn_icon,
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
         }
-        dry_run = self.state.config.get("ha_mqtt_dry_run") if self.state.config else self.dry_run
-        if dry_run:
-            _log.info("ha-discovery [DRY-RUN]: commande simulée: %s", json.dumps(body, ensure_ascii=False))
-            return
-        hook = getattr(self.state, "_ha_inject_hook", None)
-        if hook:
-            hook(
-                f"devices/{self._device_id}/messages/devicebound",
-                json.dumps(body, ensure_ascii=False),
-                1,
-            )
-        else:
-            _log.warning("ha-discovery: pas de hook d'injection disponible")
-
-    def _publish_discovery(self):
-        with self.state._lock:
-            telemetry = dict(self.state.telemetry)
-        data = next(iter(telemetry.values()), {}) if telemetry else None
-        profile = getattr(self.state, "profile", None)
-        active_zones = detect_active_zones(data) if data else []
-        zone_sensors = self.state.config.get("ha_zone_sensors") if self.state.config else False
-        configs = build_discovery_config(
-            self._device_id, profile, self.prefix, data,
-            previous_active_zones=self._last_active_zones,
-            zone_sensors=zone_sensors,
-        )
-        for topic, payload in configs:
-            self._safe_send(mqtt.build_publish(topic, payload, qos=1, retain=True))
-        self._last_active_zones = active_zones
-        self._save_zones(active_zones)
-
-    def _publish_state(self):
-        with self.state._lock:
-            telemetry = dict(self.state.telemetry)
-            connected = self.state._connected
-
-        availability = "online" if connected else "offline"
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/state/available", availability, qos=1, retain=True
+        configs.append((
+            f"{discovery_prefix}/button/aldes_vmc_{btn_id}/config",
+            json.dumps(btn_cfg, ensure_ascii=False),
         ))
 
-        self._publish_health()
+    # 3. Sensori VMC (attivi di default + disabilitati di default per quelli a 0)
+    # Formato: (id_suffisso, chiave_json, nome, unità, device_class, state_class, icona, enabled_by_default)
+    vmc_sensors = [
+        # --- Sensori attivi di default ---
+        ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "°C", "temperature", "measurement", "mdi:thermometer", True),
+        ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "°C", "temperature", "measurement", "mdi:home-thermometer", True),
+        ("reject_tpt", "reject_tpt", "Temperatura Aria Espulsa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True),
+        ("extf_flw", "extf_flw", "Portata Estrazione", "m³/h", None, "measurement", "mdi:weather-windy", True),
+        ("ffe_flw", "ffe_flw", "Portata Insufflazione", "m³/h", None, "measurement", "mdi:air-filter", True),
+        ("extf_spd", "extf_spd", "Velocità Ventola Estrazione", "rpm", None, "measurement", "mdi:fan", True),
+        ("vi_spd", "vi_spd", "Velocità Ventola Insufflazione", "rpm", None, "measurement", "mdi:fan", True),
+        ("set_spd", "set_spd", "Livello Velocità VMC", None, None, "measurement", "mdi:speedometer", True),
+        ("current_mode", "current_mode", "Codice Modalità Attiva", None, None, None, "mdi:tune", True),
+        ("ff_cpt", "ff_cpt", "Contatore Usura Filtro", "d", None, "measurement", "mdi:air-filter", True),
+        ("dep_ind", "dep_ind", "Indice Depressione Filtri", None, None, "measurement", "mdi:gauge", True),
+        ("dtb_ind", "dtb_ind", "Stato Bypass", None, None, "measurement", "mdi:valve", True),
+        ("rssi", "RSSI", "Segnale Wi-Fi Box", None, None, None, "mdi:wifi", True),
+        ("vers_uc", "Vers_UC", "Versione Firmware UC", None, None, None, "mdi:chip", True),
+        ("vers_w", "Vers_W", "Versione Firmware Wi-Fi", None, None, None, "mdi:wifi-cog", True),
+        # --- Sensori a valore zero (Disabilitati di default) ---
+        ("co2_vmc", "Co2_vmc", "CO2 VMC", "ppm", "carbon_dioxide", "measurement", "mdi:molecule-co2", False),
+        ("pm25_vmc", "Pm25_Vmc", "PM2.5 VMC", "µg/m³", "pm25", "measurement", "mdi:blur", False),
+        ("voc_vmc", "Voc_Vmc", "VOC VMC", "ppm", None, "measurement", "mdi:chemical-weapon", False),
+        ("cve_csn", "cve_csn", "Consumo Ventola Estrazione", "W", "power", "measurement", "mdi:flash", False),
+        ("vi_csn", "vi_csn", "Consumo Ventola Insufflazione", "W", "power", "measurement", "mdi:flash", False),
+        ("tte_csn", "tte_csn", "Consumo Totale VMC", "W", "power", "measurement", "mdi:flash", False),
+        ("echange_pwr", "echange_pwr", "Potenza Scambiatore", "W", "power", "measurement", "mdi:heat-wave", False),
+    ]
 
-        if not telemetry:
-            return
-
-        data = next(iter(telemetry.values()), {})
-        if not data:
-            return
-
-        self._publish_telemetry_data(data, include_zone_aliases=True)
-
-    def _publish_health(self):
-        with self.state._lock:
-            box_connected = self.state._connected
-            start_time = self.state._start_time
-
-        mqtt_connected = self._sock is not None
-        uptime = time.time() - start_time
-
-        if box_connected:
-            status = "ok"
-        elif mqtt_connected is False:
-            status = "degraded"
-        else:
-            status = "ok" if mqtt_connected is None else "degraded"
-
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/health/status", status, qos=1, retain=True
+    for suffix, key, name, unit, dev_class, state_class, icon, enabled in vmc_sensors:
+        s_cfg = {
+            "name": name,
+            "unique_id": f"aldes_{device_id}_vmc_{suffix}",
+            "state_topic": f"{prefix}/state/sensor/{key}",
+            "device": device_info,
+            "icon": icon,
+            "enabled_by_default": enabled,
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        if unit:
+            s_cfg["unit_of_measurement"] = unit
+        if dev_class:
+            s_cfg["device_class"] = dev_class
+        if state_class:
+            s_cfg["state_class"] = state_class
+        configs.append((
+            f"{discovery_prefix}/sensor/vmc_{suffix}/config",
+            json.dumps(s_cfg, ensure_ascii=False),
         ))
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/health/uptime", str(round(uptime, 1)), qos=1, retain=True
+
+    configs.extend(_build_health_configs(device_id, device_info, prefix, discovery_prefix))
+    return configs
+
+
+def build_discovery_config(device_id, profile, prefix="aldes", data=None,
+                           previous_active_zones=None, zone_sensors=False):
+    if is_vmc_device(profile, data):
+        return build_vmc_discovery_config(device_id, profile, prefix=prefix, data=data)
+
+    configs = []
+    discovery_prefix = "homeassistant"
+
+    device_info = {
+        "identifiers": [f"aldes_{device_id}"],
+        "name": "Aldes T.ONE",
+        "manufacturer": "Aldes",
+        "model": profile.name if profile else "T.ONE AquaAIR",
+    }
+
+    min_temp, max_temp = _get_min_max(data)
+
+    active_zones = detect_active_zones(data)
+    air_programs_clim = profile_mode_labels(profile, "air_modes_clim", ALDES_TO_HA_PRESET)
+    air_programs_heat = profile_mode_labels(profile, "air_modes_heat", ALDES_TO_HA_PRESET)
+    air_programs = _filter_air_programs(air_programs_clim, air_programs_heat, _air_mode_code(data))
+    water_programs = profile_mode_labels(profile, "water_modes", ALDES_WATER_TO_HA)
+
+    ha_entities = (profile.ha_discovery.get("entities", {}) if profile else {}) or {}
+    climate_entities = ha_entities.get("climate", []) or []
+    temp_step = climate_entities[0].get("temp_step", 1) if climate_entities else 1
+
+    if previous_active_zones is not None:
+        for zi in range(10):
+            if zi not in active_zones:
+                configs.append((f"{discovery_prefix}/climate/aldes_zone{zi}/config", ""))
+
+    for zone_idx in active_zones:
+        zone_label = f"Zone {zone_idx + 1}"
+
+        climate_config = {
+            "name": zone_label,
+            "unique_id": f"aldes_{device_id}_climate_zone{zone_idx}",
+            "device": device_info,
+            "modes": ["off", "heat", "cool"],
+            "mode_state_topic": f"{prefix}/state/mode",
+            "mode_command_topic": f"{prefix}/set/mode",
+            "temperature_state_topic": f"{prefix}/state/zone{zone_idx}/consigne",
+            "temperature_command_topic": f"{prefix}/set/zone{zone_idx}/consigne",
+            "current_temperature_topic": f"{prefix}/state/zone{zone_idx}/temperature",
+            "temp_unit": "C",
+            "min_temp": min_temp,
+            "max_temp": max_temp,
+            "temp_step": temp_step,
+            "precision": 0.1,
+            "preset_modes": air_programs,
+            "preset_mode_state_topic": f"{prefix}/state/preset",
+            "preset_mode_command_topic": f"{prefix}/set/preset",
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "icon": "mdi:heat-pump",
+        }
+        configs.append((
+            f"{discovery_prefix}/climate/aldes_zone{zone_idx}/config",
+            json.dumps(climate_config, ensure_ascii=False),
         ))
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/health/mqtt_connected", str(mqtt_connected).lower(), qos=1, retain=True
-        ))
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/health/box_connected", str(box_connected).lower(), qos=1, retain=True
-        ))
 
-    def publish_telemetry(self, data):
-        if not self._sock:
-            return
+    if not active_zones:
+        climate_config = {
+            "name": "PAC Aldes",
+            "unique_id": f"aldes_{device_id}_climate",
+            "device": device_info,
+            "modes": ["off", "heat", "cool"],
+            "mode_state_topic": f"{prefix}/state/mode",
+            "mode_command_topic": f"{prefix}/set/mode",
+            "temperature_state_topic": f"{prefix}/state/consigne",
+            "temperature_command_topic": f"{prefix}/set/consigne",
+            "current_temperature_topic": f"{prefix}/state/temperature",
+            "temp_unit": "C",
+            "min_temp": min_temp,
+            "max_temp": max_temp,
+            "temp_step": temp_step,
+            "precision": 0.1,
+            "preset_modes": air_programs,
+            "preset_mode_state_topic": f"{prefix}/state/preset",
+            "preset_mode_command_topic": f"{prefix}/set/preset",
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+            "icon": "mdi:heat-pump",
+        }
+        configs.append((f"{discovery_prefix}/climate/aldes/config", json.dumps(climate_config, ensure_ascii=False)))
 
-        air_mode_code = self._get_air_mode_code(data)
-        if air_mode_code:
-            ha_mode = ALDES_TO_HA_MODE.get(air_mode_code, "off")
-            if self._last_mode is not None and self._last_mode != ha_mode:
-                _log.info("ha-discovery: mode change %s -> %s, republish discovery", self._last_mode, ha_mode)
-                self._publish_discovery()
-            self._last_mode = ha_mode
+    outdoor_config = {
+        "name": "PAC Aldes Extérieur",
+        "unique_id": f"aldes_{device_id}_outdoor_temp",
+        "state_topic": f"{prefix}/state/sensor/Text",
+        "unit_of_measurement": "°C",
+        "device_class": "temperature",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:thermometer",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/outdoor_temp/config", json.dumps(outdoor_config, ensure_ascii=False)))
 
-        self._publish_telemetry_data(data, include_zone_aliases=False)
+    indoor_config = {
+        "name": "PAC Aldes Intérieur",
+        "unique_id": f"aldes_{device_id}_indoor_temp",
+        "state_topic": f"{prefix}/state/sensor/MT0",
+        "unit_of_measurement": "°C",
+        "device_class": "temperature",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:thermometer",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/indoor_temp/config", json.dumps(indoor_config, ensure_ascii=False)))
 
-    def _publish_telemetry_data(self, data, include_zone_aliases=False):
-        air_mode_code = self._get_air_mode_code(data)
-        if air_mode_code:
-            ha_mode = ALDES_TO_HA_MODE.get(air_mode_code, "off")
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/mode", ha_mode, qos=1, retain=True
-            ))
-            profile = getattr(self.state, "profile", None)
-            preset = profile_label_for_code(
-                profile, ["air_modes_clim", "air_modes_heat"], air_mode_code, ALDES_TO_HA_PRESET
-            )
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/preset", preset, qos=1, retain=True
-            ))
+    mode_config = {
+        "name": "PAC Aldes Mode Air",
+        "unique_id": f"aldes_{device_id}_air_mode",
+        "state_topic": f"{prefix}/state/sensor/UAM",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:fog",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/air_mode/config", json.dumps(mode_config, ensure_ascii=False)))
 
-        consignes = self.state.consignes_state()
-        active_zones = detect_active_zones(data)
+    compressor_config = {
+        "name": "PAC Aldes Compresseur",
+        "unique_id": f"aldes_{device_id}_compressor",
+        "state_topic": f"{prefix}/state/sensor/MfAc",
+        "payload_on": "1",
+        "payload_off": "0",
+        "device_class": "running",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:cog",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/compressor/config", json.dumps(compressor_config, ensure_ascii=False)))
+
+    antil_config = {
+        "name": "Protection anti-légionelles",
+        "unique_id": f"aldes_{device_id}_antil",
+        "state_topic": f"{prefix}/state/sensor/AntiL",
+        "payload_on": "1",
+        "payload_off": "0",
+        "device_class": "running",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:shield-check",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/antil/config", json.dumps(antil_config, ensure_ascii=False)))
+
+    water_heater_config = {
+        "name": "Ballon ECS",
+        "unique_id": f"aldes_{device_id}_water_heater",
+        "device": device_info,
+        "operation_list": water_programs,
+        "operation_mode_state_topic": f"{prefix}/state/ecs",
+        "operation_mode_command_topic": f"{prefix}/set/ecs",
+        "current_temperature_topic": f"{prefix}/state/sensor/TBBa",
+        "current_temperature_unit": "°C",
+        "device_class": "water_heater",
+        "icon": "mdi:water-boiler",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/water_heater/aldes_ballon/config", json.dumps(water_heater_config, ensure_ascii=False)))
+
+    dhw_level_config = {
+        "name": "Niveau ECS",
+        "unique_id": f"aldes_{device_id}_dhw_level",
+        "state_topic": f"{prefix}/state/sensor/NED",
+        "unit_of_measurement": "%",
+        "icon": "mdi:water-percent",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/dhw_level/config", json.dumps(dhw_level_config, ensure_ascii=False)))
+
+    dhw_temp_bottom_config = {
+        "name": "Ballon ECS Bas",
+        "unique_id": f"aldes_{device_id}_dhw_temp_bottom",
+        "state_topic": f"{prefix}/state/sensor/TBBa",
+        "unit_of_measurement": "°C",
+        "device_class": "temperature",
+        "icon": "mdi:thermometer",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/dhw_temp_bottom/config", json.dumps(dhw_temp_bottom_config, ensure_ascii=False)))
+
+    dhw_temp_top_config = {
+        "name": "Ballon ECS Haut",
+        "unique_id": f"aldes_{device_id}_dhw_temp_top",
+        "state_topic": f"{prefix}/state/sensor/TBHa",
+        "unit_of_measurement": "°C",
+        "device_class": "temperature",
+        "icon": "mdi:thermometer",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/dhw_temp_top/config", json.dumps(dhw_temp_top_config, ensure_ascii=False)))
+
+    vacation_start_config = {
+        "name": "PAC Aldes Vacances Début",
+        "unique_id": f"aldes_{device_id}_vacation_start",
+        "state_topic": f"{prefix}/state/vacation_start",
+        "command_topic": f"{prefix}/set/vacation_start",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:calendar-start",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/date/vacation_start/config", json.dumps(vacation_start_config, ensure_ascii=False)))
+
+    vacation_end_config = {
+        "name": "PAC Aldes Vacances Fin",
+        "unique_id": f"aldes_{device_id}_vacation_end",
+        "state_topic": f"{prefix}/state/vacation_end",
+        "command_topic": f"{prefix}/set/vacation_end",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:calendar-end",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/date/vacation_end/config", json.dumps(vacation_end_config, ensure_ascii=False)))
+
+    vacation_enable_config = {
+        "name": "PAC Aldes Vacances",
+        "unique_id": f"aldes_{device_id}_vacation_enable",
+        "state_topic": f"{prefix}/state/vacation_enable",
+        "command_topic": f"{prefix}/set/vacation_enable",
+        "payload_on": "on",
+        "payload_off": "off",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:beach",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/switch/vacation_enable/config", json.dumps(vacation_enable_config, ensure_ascii=False)))
+
+    people_config = {
+        "name": "Nombre de personnes",
+        "unique_id": f"aldes_{device_id}_people",
+        "state_topic": f"{prefix}/state/people",
+        "command_topic": f"{prefix}/set/people",
+        "min": 2,
+        "max": 6,
+        "step": 1,
+        "mode": "slider",
+        "device": {"identifiers": [f"aldes_{device_id}"]},
+        "icon": "mdi:account-group",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/number/aldes_people/config", json.dumps(people_config, ensure_ascii=False)))
+
+    configs.extend(_build_health_configs(device_id, device_info, prefix, discovery_prefix))
+
+    ventilation_sensors = [
+        ("fan_rpm", "RVeI", "Ventilateur Aldes", "mdi:fan", "rpm"),
+        ("airflow_nominal", "Dno", "Debit nominal Aldes", "mdi:air-filter", "m\u00b3/h"),
+        ("airflow_max", "Dma", "Debit max Aldes", "mdi:air-filter", "m\u00b3/h"),
+        ("airflow_medium", "Dint", "Debit intermediaire Aldes", "mdi:air-filter", "m\u00b3/h"),
+        ("airflow_night", "DLN", "Debit nuit Aldes", "mdi:air-filter", "m\u00b3/h"),
+        ("airflow_full", "DPLe", "Debit plein Aldes", "mdi:air-filter", "m\u00b3/h"),
+        ("airflow_max_co2", "DmCO", "Debit max CO2 Aldes", "mdi:air-filter", "m\u00b3/h"),
+    ]
+    for suffix, aldes_key, name, icon, unit in ventilation_sensors:
+        vent_config = {
+            "name": name,
+            "unique_id": f"aldes_{device_id}_{suffix}",
+            "state_topic": f"{prefix}/state/sensor/{aldes_key}",
+            "unit_of_measurement": unit,
+            "device": {"identifiers": [f"aldes_{device_id}"]},
+            "icon": icon,
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        configs.append((f"{discovery_prefix}/sensor/{suffix}/config", json.dumps(vent_config, ensure_ascii=False)))
+
+    if zone_sensors:
         for zone_idx in active_zones:
-            temp = safe_float(data.get(f"MT{zone_idx}"))
-            if temp is not None:
-                self._safe_send(mqtt.build_publish(
-                    f"{self.prefix}/state/zone{zone_idx}/temperature",
-                    f"{temp:.1f}", qos=1, retain=True
-                ))
-                if include_zone_aliases and zone_idx == 0:
-                    self._safe_send(mqtt.build_publish(
-                        f"{self.prefix}/state/sensor/MT0",
-                        f"{temp:.1f}", qos=1, retain=True
-                    ))
-
-            consigne = safe_float(data.get(f"UsC{zone_idx}"))
-            entry = consignes.get(str(zone_idx))
-            if entry and not entry.get("confirmed"):
-                consigne = float(entry["requested"])
-            if consigne is not None:
-                self._safe_send(mqtt.build_publish(
-                    f"{self.prefix}/state/zone{zone_idx}/consigne",
-                    f"{consigne:.1f}", qos=1, retain=True
-                ))
-                if include_zone_aliases and zone_idx == 0:
-                    self._safe_send(mqtt.build_publish(
-                        f"{self.prefix}/state/consigne",
-                        f"{consigne:.1f}", qos=1, retain=True
-                    ))
-
-        outdoor_temp = safe_float(data.get("Text"))
-        if outdoor_temp is not None:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/Text", f"{outdoor_temp:.1f}", qos=1, retain=True
+            zone_temp_config = {
+                "name": f"Zone {zone_idx + 1} Température",
+                "unique_id": f"aldes_{device_id}_zone{zone_idx}_temp_sensor",
+                "state_topic": f"{prefix}/state/zone{zone_idx}/temperature",
+                "unit_of_measurement": "°C",
+                "device_class": "temperature",
+                "device": device_info,
+                "icon": "mdi:thermometer",
+                "availability_topic": f"{prefix}/state/available",
+                "payload_available": "online",
+                "payload_not_available": "offline",
+            }
+            configs.append((
+                f"{discovery_prefix}/sensor/zone{zone_idx}_temp/config",
+                json.dumps(zone_temp_config, ensure_ascii=False),
             ))
 
-        if air_mode_code:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/UAM", air_mode_code, qos=1, retain=True
-            ))
-
-        mf_ac = data.get("MfAc")
-        if mf_ac is not None:
-            compressor_state = "1" if str(mf_ac) not in ("0", "", "null") else "0"
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/MfAc", compressor_state, qos=1, retain=True
-            ))
-
-        water_mode_code = self._get_water_mode_code(data)
-        if water_mode_code:
-            profile = getattr(self.state, "profile", None)
-            ha_water = profile_label_for_code(
-                profile, "water_modes", water_mode_code, ALDES_WATER_TO_HA
-            )
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/ecs", ha_water, qos=1, retain=True
-            ))
-
-        ned = safe_float(data.get("NED"))
-        if ned is not None:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/NED", f"{ned:.0f}", qos=1, retain=True
-            ))
-
-        npih = data.get("NpiH")
-        if npih is not None:
-            try:
-                people_idx = max(0, min(4, int(npih)))
-            except (ValueError, TypeError):
-                people_idx = 0
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/people", str(people_idx + 2), qos=1, retain=True
-            ))
-
-        tbb = safe_float(data.get("TBBa"))
-        if tbb is not None:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/TBBa", f"{tbb:.1f}", qos=1, retain=True
-            ))
-
-        tbh = safe_float(data.get("TBHa"))
-        if tbh is not None:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/TBHa", f"{tbh:.1f}", qos=1, retain=True
-            ))
-
-        anti_l = data.get("AntiL")
-        if anti_l is not None:
-            antil_state = "1" if str(anti_l) not in ("0", "", "null") else "0"
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/sensor/AntiL", antil_state, qos=1, retain=True
-            ))
-
-        for aldes_key in ("RVeI", "Dno", "Dma", "Dint", "DLN", "DPLe", "DmCO"):
-            val = safe_float(data.get(aldes_key))
-            if val is not None:
-                if aldes_key != "RVeI":
-                    val = val / 10.0
-                self._safe_send(mqtt.build_publish(
-                    f"{self.prefix}/state/sensor/{aldes_key}", f"{val:.0f}", qos=1, retain=True
+        for zi in range(10):
+            if zi not in active_zones:
+                configs.append((
+                    f"{discovery_prefix}/sensor/zone{zi}_temp/config", "",
                 ))
 
-        self._publish_vacation_state(data)
-
-        # Tracker les données télémétrie envoyées à HA
-        if self.state and self.state.history is not None:
-            emit_message(self.state, "out", "PUBLISH",
-                         topic=f"{self.prefix}/state/...",
-                         payload=data, source="bridge", destination="ha")
-
-    def _publish_vacation_state(self, data):
-        dvac = data.get("Dvac")
-        fvac = data.get("Fvac")
-        start_date = self._epoch_to_date_str(dvac)
-        end_date = self._epoch_to_date_str(fvac)
-
-        if start_date:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/vacation_start", start_date, qos=1, retain=True
-            ))
-        else:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/vacation_start", "", qos=1, retain=True
-            ))
-
-        if end_date:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/vacation_end", end_date, qos=1, retain=True
-            ))
-        else:
-            self._safe_send(mqtt.build_publish(
-                f"{self.prefix}/state/vacation_end", "", qos=1, retain=True
-            ))
-
-        vacation_active = bool(start_date and end_date)
-        self._safe_send(mqtt.build_publish(
-            f"{self.prefix}/state/vacation_enable",
-            "on" if vacation_active else "off",
-            qos=1, retain=True,
-        ))
-
-    def _epoch_to_date_str(self, value):
-        if not value:
-            return None
-        try:
-            ts = float(value)
-        except (TypeError, ValueError):
-            return None
-        if ts <= 0:
-            return None
-        try:
-            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
-            return dt.strftime("%Y-%m-%d")
-        except (OSError, ValueError):
-            return None
-
-    def _get_air_mode_code(self, data):
-        try:
-            index = int(float(data.get("UAM", -1)))
-            modes = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
-            if 0 <= index < len(modes):
-                return modes[index]
-        except (TypeError, ValueError):
-            pass
-        return None
-
-    def _get_water_mode_code(self, data):
-        try:
-            index = int(float(data.get("UDM", -1)))
-            codes = ["L", "M", "N"]
-            if 0 <= index < len(codes):
-                return codes[index]
-        except (TypeError, ValueError):
-            pass
-        return None
-
-    def _safe_send(self, data):
-        with self._send_lock:
-            sock = self._sock
-            if sock is None:
-                return False
-            try:
-                sock.sendall(data)
-                return True
-            except (OSError, socket.timeout):
-                return False
-
-    def _teardown(self):
-        with self._send_lock:
-            self._sock = None
-        _log.info("ha-discovery: deconnecte")
+    return configs

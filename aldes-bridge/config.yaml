@@ -1,0 +1,50 @@
+---
+name: Aldes Bridge SC150
+version: "0.20.1"
+slug: aldes-bridge-sc150
+description: Bridge MQTT/TLS locale per Aldes InspirAIR Home SC150 — Auto-Discovery Home Assistant
+url: https://github.com/<TUO_USERNAME>/<TUA_REPO>
+maintainer: Davide
+arch:
+  - amd64
+  - aarch64
+init: false
+host_network: true
+hassio_role: "manager"
+ingress: true
+ingress_port: 8080
+panel_icon: mdi:fan
+panel_title: Aldes VMC
+privileged:
+  - NET_ADMIN
+ports:
+  "18883/tcp": 18883
+map:
+  - addon_config:rw
+  - homeassistant_config:rw
+options:
+  mqtt_port: 18883
+  box_ip: ""
+  mode: bridge
+  profile: inspirair-sc150
+  history_days: 90
+  box_tz: Europe/Rome
+  ha_mqtt_enabled: true
+  ha_mqtt_dry_run: false
+  ha_mqtt_host: ""
+  ha_mqtt_port: 1883
+  ha_mqtt_user: ""
+  ha_mqtt_password: ""
+schema:
+  mqtt_port: int
+  box_ip: str
+  mode: list(bridge|proxy)
+  profile: str
+  history_days: int
+  box_tz: str
+  ha_mqtt_enabled: bool
+  ha_mqtt_dry_run: bool
+  ha_mqtt_host: str
+  ha_mqtt_port: int
+  ha_mqtt_user: str
+  ha_mqtt_password: password

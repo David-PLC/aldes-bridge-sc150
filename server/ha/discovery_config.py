@@ -1,4 +1,4 @@
-"""Construction des configs HA auto-discovery pour une PAC Aldes."""
+"""Construction des configs HA auto-discovery pour PAC et VMC Aldes."""
 import json
 import logging
 
@@ -14,6 +14,25 @@ _AIR_MODE_CODES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 _COOLING_CODES = frozenset({"F", "G", "H", "I"})
 _HEATING_CODES = frozenset({"B", "C", "D", "E"})
 
+VMC_PRESET_MODES = [
+    "Quotidiano (V)",
+    "Modalità X",
+    "Modalità Y",
+    "Vacanze (W)",
+    "Programmazione (Z)",
+]
+
+
+def is_vmc_device(profile, data):
+    """Rileva se il dispositivo o il profilo attivo è una VMC (es. InspirAIR SC150)."""
+    if profile and getattr(profile, "type", None) == "vmc":
+        return True
+    if isinstance(data, dict):
+        pid = str(data.get("productid") or "")
+        if pid.endswith("_AIR") or "outside_tpt" in data or "extf_flw" in data or "current_mode" in data:
+            return True
+    return False
+
 
 def _air_mode_code(data):
     raw = data.get("UAM", "") if data else ""
@@ -27,12 +46,6 @@ def _air_mode_code(data):
 
 
 def _filter_air_programs(clim_labels, heat_labels, air_code):
-    """Retourne les presets air selon la famille active (issue #67).
-
-    clim (F-I) → uniquement les presets clim, heat (B-E) → uniquement les
-    presets chauffage, off (A) ou inconnu → union des deux (permet de
-    choisir une famille depuis HA).
-    """
     if air_code in _COOLING_CODES:
         selected = clim_labels
     elif air_code in _HEATING_CODES:
@@ -84,8 +97,209 @@ def detect_active_zones(data):
     return zones
 
 
+def _build_health_configs(device_id, device_info, prefix, discovery_prefix="homeassistant"):
+    configs = []
+    bridge_status_config = {
+        "name": "Aldes Bridge Status",
+        "unique_id": f"aldes_{device_id}_bridge_status",
+        "state_topic": f"{prefix}/health/status",
+        "payload_on": "degraded",
+        "payload_off": "ok",
+        "device_class": "problem",
+        "device": device_info,
+        "icon": "mdi:heart-pulse",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/bridge_status/config", json.dumps(bridge_status_config, ensure_ascii=False)))
+
+    bridge_uptime_config = {
+        "name": "Aldes Bridge Uptime",
+        "unique_id": f"aldes_{device_id}_bridge_uptime",
+        "state_topic": f"{prefix}/health/uptime",
+        "unit_of_measurement": "s",
+        "device_class": "duration",
+        "device": device_info,
+        "icon": "mdi:timer-outline",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/sensor/bridge_uptime/config", json.dumps(bridge_uptime_config, ensure_ascii=False)))
+
+    mqtt_connected_config = {
+        "name": "Aldes MQTT Connected",
+        "unique_id": f"aldes_{device_id}_mqtt_connected",
+        "state_topic": f"{prefix}/health/mqtt_connected",
+        "payload_on": "true",
+        "payload_off": "false",
+        "device_class": "connectivity",
+        "device": device_info,
+        "icon": "mdi:lan-connect",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/mqtt_connected/config", json.dumps(mqtt_connected_config, ensure_ascii=False)))
+
+    box_connected_config = {
+        "name": "Aldes Box Connected",
+        "unique_id": f"aldes_{device_id}_box_connected",
+        "state_topic": f"{prefix}/health/box_connected",
+        "payload_on": "true",
+        "payload_off": "false",
+        "device_class": "connectivity",
+        "device": device_info,
+        "icon": "mdi:router-wireless",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+    }
+    configs.append((f"{discovery_prefix}/binary_sensor/box_connected/config", json.dumps(box_connected_config, ensure_ascii=False)))
+    return configs
+
+
+def build_vmc_discovery_config(device_id, profile, prefix="aldes", data=None):
+    """Costruisce la configurazione MQTT Auto-Discovery per Aldes InspirAIR Home SC150."""
+    configs = []
+    discovery_prefix = "homeassistant"
+
+    sw_ver = None
+    if isinstance(data, dict):
+        uc = data.get("Vers_UC")
+        vw = data.get("Vers_W")
+        if uc is not None or vw is not None:
+            sw_ver = f"UC {uc} / Wi-Fi {vw}"
+
+    device_info = {
+        "identifiers": [f"aldes_{device_id}"],
+        "name": profile.name if profile else "InspirAIR Home SC150",
+        "manufacturer": "Aldes",
+        "model": profile.name if profile else "InspirAIR Home SC150",
+    }
+    if sw_ver:
+        device_info["sw_version"] = sw_ver
+
+    # Rimuove eventuale entità climate residua se prima era attivo il profilo PAC
+    configs.append((f"{discovery_prefix}/climate/aldes/config", ""))
+    configs.append((f"{discovery_prefix}/water_heater/aldes_ballon/config", ""))
+
+    # 1. Entità FAN nativa di Home Assistant
+    fan_config = {
+        "name": "VMC InspirAIR SC150",
+        "unique_id": f"aldes_{device_id}_vmc_fan",
+        "device": device_info,
+        "state_topic": f"{prefix}/state/fan/state",
+        "command_topic": f"{prefix}/set/fan/state",
+        " payload_on": "ON",
+        "payload_off": "OFF",
+        "percentage_state_topic": f"{prefix}/state/fan/speed",
+        "percentage_command_topic": f"{prefix}/set/fan/speed",
+        "speed_range_min": 1,
+        "speed_range_max": 3,
+        "preset_modes": VMC_PRESET_MODES,
+        "preset_mode_state_topic": f"{prefix}/state/fan/preset",
+        "preset_mode_command_topic": f"{prefix}/set/fan/preset",
+        "availability_topic": f"{prefix}/state/available",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "icon": "mdi:air-Purifier",
+    }
+    # Correzione chiave senza spazio iniziale
+    fan_config.pop(" payload_on", None)
+    fan_config["payload_on"] = "ON"
+    fan_config["icon"] = "mdi:fan"
+    configs.append((
+        f"{discovery_prefix}/fan/aldes_vmc/config",
+        json.dumps(fan_config, ensure_ascii=False),
+    ))
+
+    # 2. Pulsanti (Button) per testare direttamente X, Y e tornare a V o Z
+    test_buttons = [
+        ("mode_v", "Modalità Quotidiano (Codice V)", "mdi:home-clock"),
+        ("mode_x", "Test Modalità X (Boost / Ospiti)", "mdi:fan-chevron-up"),
+        ("mode_y", "Test Modalità Y (Ospiti / Boost)", "mdi:account-multiple-plus"),
+        ("mode_z", "Modalità Programmazione (Codice Z)", "mdi:calendar-clock"),
+    ]
+    for btn_id, btn_name, btn_icon in test_buttons:
+        btn_cfg = {
+            "name": btn_name,
+            "unique_id": f"aldes_{device_id}_btn_{btn_id}",
+            "command_topic": f"{prefix}/set/button/{btn_id}",
+            "payload_press": "PRESS",
+            "device": device_info,
+            "icon": btn_icon,
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        configs.append((
+            f"{discovery_prefix}/button/aldes_vmc_{btn_id}/config",
+            json.dumps(btn_cfg, ensure_ascii=False),
+        ))
+
+    # 3. Sensori VMC (attivi di default + disabilitati di default per quelli a 0)
+    # Formato: (id_suffisso, chiave_json, nome, unità, device_class, state_class, icona, enabled_by_default)
+    vmc_sensors = [
+        # --- Sensori attivi di default ---
+        ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "°C", "temperature", "measurement", "mdi:thermometer", True),
+        ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "°C", "temperature", "measurement", "mdi:home-thermometer", True),
+        ("reject_tpt", "reject_tpt", "Temperatura Aria Espulsa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True),
+        ("extf_flw", "extf_flw", "Portata Estrazione", "m³/h", None, "measurement", "mdi:weather-windy", True),
+        ("ffe_flw", "ffe_flw", "Portata Insufflazione", "m³/h", None, "measurement", "mdi:air-filter", True),
+        ("extf_spd", "extf_spd", "Velocità Ventola Estrazione", "rpm", None, "measurement", "mdi:fan", True),
+        ("vi_spd", "vi_spd", "Velocità Ventola Insufflazione", "rpm", None, "measurement", "mdi:fan", True),
+        ("set_spd", "set_spd", "Livello Velocità VMC", None, None, "measurement", "mdi:speedometer", True),
+        ("current_mode", "current_mode", "Codice Modalità Attiva", None, None, None, "mdi:tune", True),
+        ("ff_cpt", "ff_cpt", "Contatore Usura Filtro", "d", None, "measurement", "mdi:air-filter", True),
+        ("dep_ind", "dep_ind", "Indice Depressione Filtri", None, None, "measurement", "mdi:gauge", True),
+        ("dtb_ind", "dtb_ind", "Stato Bypass", None, None, "measurement", "mdi:valve", True),
+        ("rssi", "RSSI", "Segnale Wi-Fi Box", None, None, None, "mdi:wifi", True),
+        ("vers_uc", "Vers_UC", "Versione Firmware UC", None, None, None, "mdi:chip", True),
+        ("vers_w", "Vers_W", "Versione Firmware Wi-Fi", None, None, None, "mdi:wifi-cog", True),
+        # --- Sensori a valore zero (Disabilitati di default) ---
+        ("co2_vmc", "Co2_vmc", "CO2 VMC", "ppm", "carbon_dioxide", "measurement", "mdi:molecule-co2", False),
+        ("pm25_vmc", "Pm25_Vmc", "PM2.5 VMC", "µg/m³", "pm25", "measurement", "mdi:blur", False),
+        ("voc_vmc", "Voc_Vmc", "VOC VMC", "ppm", None, "measurement", "mdi:chemical-weapon", False),
+        ("cve_csn", "cve_csn", "Consumo Ventola Estrazione", "W", "power", "measurement", "mdi:flash", False),
+        ("vi_csn", "vi_csn", "Consumo Ventola Insufflazione", "W", "power", "measurement", "mdi:flash", False),
+        ("tte_csn", "tte_csn", "Consumo Totale VMC", "W", "power", "measurement", "mdi:flash", False),
+        ("echange_pwr", "echange_pwr", "Potenza Scambiatore", "W", "power", "measurement", "mdi:heat-wave", False),
+    ]
+
+    for suffix, key, name, unit, dev_class, state_class, icon, enabled in vmc_sensors:
+        s_cfg = {
+            "name": name,
+            "unique_id": f"aldes_{device_id}_vmc_{suffix}",
+            "state_topic": f"{prefix}/state/sensor/{key}",
+            "device": device_info,
+            "icon": icon,
+            "enabled_by_default": enabled,
+            "availability_topic": f"{prefix}/state/available",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        }
+        if unit:
+            s_cfg["unit_of_measurement"] = unit
+        if dev_class:
+            s_cfg["device_class"] = dev_class
+        if state_class:
+            s_cfg["state_class"] = state_class
+        configs.append((
+            f"{discovery_prefix}/sensor/vmc_{suffix}/config",
+            json.dumps(s_cfg, ensure_ascii=False),
+        ))
+
+    configs.extend(_build_health_configs(device_id, device_info, prefix, discovery_prefix))
+    return configs
+
+
 def build_discovery_config(device_id, profile, prefix="aldes", data=None,
                            previous_active_zones=None, zone_sensors=False):
+    if is_vmc_device(profile, data):
+        return build_vmc_discovery_config(device_id, profile, prefix=prefix, data=data)
+
     configs = []
     discovery_prefix = "homeassistant"
 
@@ -356,64 +570,7 @@ def build_discovery_config(device_id, profile, prefix="aldes", data=None,
     }
     configs.append((f"{discovery_prefix}/number/aldes_people/config", json.dumps(people_config, ensure_ascii=False)))
 
-    bridge_status_config = {
-        "name": "Aldes Bridge Status",
-        "unique_id": f"aldes_{device_id}_bridge_status",
-        "state_topic": f"{prefix}/health/status",
-        "payload_on": "degraded",
-        "payload_off": "ok",
-        "device_class": "problem",
-        "device": device_info,
-        "icon": "mdi:heart-pulse",
-        "availability_topic": f"{prefix}/state/available",
-        "payload_available": "online",
-        "payload_not_available": "offline",
-    }
-    configs.append((f"{discovery_prefix}/binary_sensor/bridge_status/config", json.dumps(bridge_status_config, ensure_ascii=False)))
-
-    bridge_uptime_config = {
-        "name": "Aldes Bridge Uptime",
-        "unique_id": f"aldes_{device_id}_bridge_uptime",
-        "state_topic": f"{prefix}/health/uptime",
-        "unit_of_measurement": "s",
-        "device_class": "duration",
-        "device": device_info,
-        "icon": "mdi:timer-outline",
-        "availability_topic": f"{prefix}/state/available",
-        "payload_available": "online",
-        "payload_not_available": "offline",
-    }
-    configs.append((f"{discovery_prefix}/sensor/bridge_uptime/config", json.dumps(bridge_uptime_config, ensure_ascii=False)))
-
-    mqtt_connected_config = {
-        "name": "Aldes MQTT Connected",
-        "unique_id": f"aldes_{device_id}_mqtt_connected",
-        "state_topic": f"{prefix}/health/mqtt_connected",
-        "payload_on": "true",
-        "payload_off": "false",
-        "device_class": "connectivity",
-        "device": device_info,
-        "icon": "mdi:lan-connect",
-        "availability_topic": f"{prefix}/state/available",
-        "payload_available": "online",
-        "payload_not_available": "offline",
-    }
-    configs.append((f"{discovery_prefix}/binary_sensor/mqtt_connected/config", json.dumps(mqtt_connected_config, ensure_ascii=False)))
-
-    box_connected_config = {
-        "name": "Aldes Box Connected",
-        "unique_id": f"aldes_{device_id}_box_connected",
-        "state_topic": f"{prefix}/health/box_connected",
-        "payload_on": "true",
-        "payload_off": "false",
-        "device_class": "connectivity",
-        "device": device_info,
-        "icon": "mdi:router-wireless",
-        "availability_topic": f"{prefix}/state/available",
-        "payload_available": "online",
-        "payload_not_available": "offline",
-    }
-    configs.append((f"{discovery_prefix}/binary_sensor/box_connected/config", json.dumps(box_connected_config, ensure_ascii=False)))
+    configs.extend(_build_health_configs(device_id, device_info, prefix, discovery_prefix))
 
     ventilation_sensors = [
         ("fan_rpm", "RVeI", "Ventilateur Aldes", "mdi:fan", "rpm"),
