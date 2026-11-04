@@ -1,6 +1,6 @@
 ---
 name: Aldes Bridge SC150
-version: "2.0.0"
+version: "2.0.1"
 slug: aldes-bridge
 description: Bridge MQTT/TLS locale nativo per VMC Aldes InspirAIR Home SC150
 url: https://github.com/David-PLC/aldes-bridge-sc150
