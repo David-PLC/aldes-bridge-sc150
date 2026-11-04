@@ -27,4 +27,4 @@ if [ "$MQTT_PORT" != "8883" ]; then
 fi
 
 mkdir -p /config/aldes
-exec python3 -m server.main
+cd /app`nexport PYTHONPATH=/app`nexec python3 -m server.main
