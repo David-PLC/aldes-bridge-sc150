@@ -1,0 +1,42 @@
+{
+  "device_name": "Aldes InspirAIR Home SC150",
+  "select_mode_name": "Modalit\u00e0 VMC",
+  "box_connected_name": "Connessione Connect Box",
+  "modes": {
+    "V": "Quotidiano",
+    "Y": "Cucina",
+    "X": "Boost",
+    "W": "Vacanze",
+    "Z": "Programma aria"
+  },
+  "buttons": {
+    "mode_v": "Modalit\u00e0 Quotidiano (V)",
+    "mode_y": "Modalit\u00e0 Cucina (Y)",
+    "mode_x": "Modalit\u00e0 Boost (X)",
+    "mode_w": "Modalit\u00e0 Vacanze (W)"
+  },
+  "sensors": {
+    "outside_tpt": "Temperatura Aria Esterna",
+    "ext_tpt": "Temperatura Aria Estratta",
+    "reject_tpt": "Temperatura Aria Espulsa",
+    "extf_flw": "Portata Estrazione",
+    "ffe_flw": "Portata Insufflazione",
+    "extf_spd": "Velocit\u00e0 Ventola Estrazione",
+    "vi_spd": "Velocit\u00e0 Ventola Insufflazione",
+    "set_spd": "Livello Velocit\u00e0 VMC",
+    "current_mode": "Codice Modalit\u00e0 Attiva",
+    "ff_cpt": "Contatore Usura Filtro",
+    "dep_ind": "Indice Depressione Filtri",
+    "dtb_ind": "Stato Bypass",
+    "rssi": "Segnale Wi-Fi Box",
+    "vers_uc": "Versione Firmware UC",
+    "vers_w": "Versione Firmware Wi-Fi",
+    "co2_vmc": "CO2 VMC",
+    "pm25_vmc": "PM2.5 VMC",
+    "voc_vmc": "VOC VMC",
+    "cve_csn": "Consumo Ventola Estrazione",
+    "vi_csn": "Consumo Ventola Insufflazione",
+    "tte_csn": "Consumo Totale VMC",
+    "echange_pwr": "Potenza Scambiatore"
+  }
+}

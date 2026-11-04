@@ -1,0 +1,34 @@
+#include <tunables/global>
+
+profile aldes-bridge flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  capability net_admin,
+  capability net_raw,
+  capability net_bind_service,
+
+  network inet stream,
+  network inet dgram,
+  network inet6 stream,
+  network inet6 dgram,
+  network netlink raw,
+
+  /run.sh rix,
+  /bin/** rix,
+  /usr/bin/** rix,
+  /usr/local/bin/** rix,
+  /usr/sbin/** rix,
+  /sbin/** rix,
+
+  /app/** r,
+  /etc/** r,
+  /usr/lib/** rm,
+  /usr/local/lib/** rm,
+  /lib/** rm,
+  /proc/net/** r,
+  /sys/module/** r,
+
+  /data/** rw,
+  /config/** rw,
+  /tmp/** rwk,
+}

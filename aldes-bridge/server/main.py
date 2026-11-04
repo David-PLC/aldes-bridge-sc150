@@ -22,41 +22,49 @@ logging.basicConfig(
 _log = logging.getLogger("aldes-sc150")
 
 TELEMETRY_CACHE = "/config/aldes/telemetry.json"
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-VMC_CODE_TO_PRESET = {
-    "V": "Quotidiano (V)",
-    "X": "Modalita X",
-    "Y": "Modalita Y",
-    "W": "Vacanze (W)",
-    "Z": "Programmazione (Z)",
-}
-VMC_PRESET_TO_CODE = {v.lower(): k for k, v in VMC_CODE_TO_PRESET.items()}
 
-# (suffisso_id, chiave_json, nome, unita, device_class, state_class, icona, enabled_by_default, is_float)
-SENSORS = [
-    ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "°C", "temperature", "measurement", "mdi:thermometer", True, True),
-    ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "°C", "temperature", "measurement", "mdi:home-thermometer", True, True),
-    ("reject_tpt", "reject_tpt", "Temperatura Aria Reimmessa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True),
-    ("extf_flw", "extf_flw", "Portata Estrazione", "m³/h", None, "measurement", "mdi:weather-windy", True, False),
-    ("ffe_flw", "ffe_flw", "Portata Immissione", "m³/h", None, "measurement", "mdi:air-filter", True, False),
-    ("extf_spd", "extf_spd", "Velocita Ventola Estrazione", "rpm", None, "measurement", "mdi:fan", True, False),
-    ("vi_spd", "vi_spd", "Velocita Ventola Immissione", "rpm", None, "measurement", "mdi:fan", True, False),
-    ("set_spd", "set_spd", "Livello Velocita VMC", None, None, "measurement", "mdi:speedometer", True, False),
-    ("current_mode", "current_mode", "Codice Modalita Attiva", None, None, None, "mdi:tune", True, None),
-    ("ff_cpt", "ff_cpt", "Contatore Usura Filtro", "d", None, "measurement", "mdi:air-filter", True, False),
-    ("dep_ind", "dep_ind", "Indice Depressione Filtri", None, None, "measurement", "mdi:gauge", True, False),
-    ("dtb_ind", "dtb_ind", "Stato Bypass", None, None, "measurement", "mdi:valve", True, False),
-    ("vers_uc", "Vers_UC", "Versione Firmware UC", None, None, None, "mdi:chip", True, False),
-    ("vers_w", "Vers_W", "Versione Firmware Wi-Fi", None, None, None, "mdi:wifi-cog", True, None),
-    # Sensori a valore zero: creati ma disabilitati di default
-    ("rssi", "RSSI", "Segnale Wi-Fi Box", None, None, None, "mdi:wifi", False, None),
-    ("co2_vmc", "Co2_vmc", "CO2 VMC", "ppm", "carbon_dioxide", "measurement", "mdi:molecule-co2", False, True),
-    ("pm25_vmc", "Pm25_Vmc", "PM2.5 VMC", "Âµg/mÂ³", "pm25", "measurement", "mdi:blur", False, True),
-    ("voc_vmc", "Voc_Vmc", "VOC VMC", "ppm", None, "measurement", "mdi:chemical-weapon", False, False),
-    ("cve_csn", "cve_csn", "Consumo Ventola Estrazione", "W", "power", "measurement", "mdi:flash", False, False),
-    ("vi_csn", "vi_csn", "Consumo Ventola Immissione", "W", "power", "measurement", "mdi:flash", False, False),
-    ("tte_csn", "tte_csn", "Consumo Totale VMC", "W", "power", "measurement", "mdi:flash", False, False),
-    ("echange_pwr", "echange_pwr", "Potenza Scambiatore", "W", "power", "measurement", "mdi:heat-wave", False, False),
+def load_translations(lang="it"):
+    path = os.path.join(APP_ROOT, "translations", f"{lang}.json")
+    if not os.path.isfile(path):
+        path = os.path.join(APP_ROOT, "translations", "it.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        _log.warning("Impossibile caricare %s (%s), uso fallback interno", path, exc)
+        return {}
+
+
+# Definizione tecnica dei sensori:
+# (id_suffisso, chiave_json, unita, device_class, state_class, icona, enabled_by_default, is_float, active)
+# Nota: "rssi" ha active=False per rimanere nel codice ma essere rimosso da Home Assistant.
+SENSORS_SPEC = [
+    ("outside_tpt", "outside_tpt", "\u00b0C", "temperature", "measurement", "mdi:thermometer", True, True, True),
+    ("ext_tpt", "ext_tpt", "\u00b0C", "temperature", "measurement", "mdi:home-thermometer", True, True, True),
+    ("reject_tpt", "reject_tpt", "\u00b0C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True, True),
+    ("extf_flw", "extf_flw", "m\u00b3/h", None, "measurement", "mdi:weather-windy", True, False, True),
+    ("ffe_flw", "ffe_flw", "m\u00b3/h", None, "measurement", "mdi:air-filter", True, False, True),
+    ("extf_spd", "extf_spd", "rpm", None, "measurement", "mdi:fan", True, False, True),
+    ("vi_spd", "vi_spd", "rpm", None, "measurement", "mdi:fan", True, False, True),
+    ("set_spd", "set_spd", None, None, "measurement", "mdi:speedometer", True, False, True),
+    ("current_mode", "current_mode", None, None, None, "mdi:tune", True, None, True),
+    ("ff_cpt", "ff_cpt", "d", None, "measurement", "mdi:air-filter", True, False, True),
+    ("dep_ind", "dep_ind", None, None, "measurement", "mdi:gauge", True, False, True),
+    ("dtb_ind", "dtb_ind", None, None, "measurement", "mdi:valve", True, False, True),
+    # RSSI disattivato (active=False): rimane a codice ma viene rimosso da Home Assistant
+    ("rssi", "RSSI", None, None, None, "mdi:wifi", False, None, False),
+    ("vers_uc", "Vers_UC", None, None, None, "mdi:chip", True, False, True),
+    ("vers_w", "Vers_W", None, None, None, "mdi:wifi-cog", True, None, True),
+    # Sensori a valore zero (creati ma disabilitati di default su Home Assistant)
+    ("co2_vmc", "Co2_vmc", "ppm", "carbon_dioxide", "measurement", "mdi:molecule-co2", False, True, True),
+    ("pm25_vmc", "Pm25_Vmc", "\u00b5g/m\u00b3", "pm25", "measurement", "mdi:blur", False, True, True),
+    ("voc_vmc", "Voc_Vmc", "ppm", None, "measurement", "mdi:chemical-weapon", False, False, True),
+    ("cve_csn", "cve_csn", "W", "power", "measurement", "mdi:flash", False, False, True),
+    ("vi_csn", "vi_csn", "W", "power", "measurement", "mdi:flash", False, False, True),
+    ("tte_csn", "tte_csn", "W", "power", "measurement", "mdi:flash", False, False, True),
+    ("echange_pwr", "echange_pwr", "W", "power", "measurement", "mdi:heat-wave", False, False, True),
 ]
 
 
@@ -107,9 +115,22 @@ def detect_mqtt_broker():
 
 
 class SC150Bridge:
-    def __init__(self, listen_port=18883, prefix="aldes"):
+    def __init__(self, listen_port=18883, prefix="aldes", lang="it"):
         self.listen_port = listen_port
         self.prefix = prefix
+        self.tr = load_translations(lang)
+        modes_tr = self.tr.get("modes", {})
+        # ModalitÃ  esposte nel selettore HA (esclusa Z come richiesto)
+        self.vmc_modes = {
+            "V": modes_tr.get("V", "Quotidiano"),
+            "Y": modes_tr.get("Y", "Cucina"),
+            "X": modes_tr.get("X", "Boost"),
+            "W": modes_tr.get("W", "Vacanze"),
+        }
+        self.vmc_mode_to_code = {v.lower(): k for k, v in self.vmc_modes.items()}
+        # Dizionario completo che include anche Z a livello di codice
+        self.all_vmc_codes = {**self.vmc_modes, "Z": modes_tr.get("Z", "Programma aria")}
+
         self.box_sock = None
         self.box_lock = threading.Lock()
         self.box_connected = False
@@ -128,7 +149,6 @@ class SC150Bridge:
                 if isinstance(d, dict):
                     if d.get("productid"):
                         self.product_id = d["productid"]
-                    _log.info("Telemetria precedente caricata da cache (%d campi)", len(d))
                     return d
         except Exception:
             pass
@@ -203,7 +223,6 @@ class SC150Bridge:
                         self.product_id = info["client_id"]
                     sock.settimeout(max(90, info.get("keepalive", 60) * 2))
                     sock.sendall(mqtt.build_connack(0))
-                    _log.info("MQTT CONNECT da Box: client_id=%s", self.product_id)
                 elif ptype == mqtt.PT_SUBSCRIBE:
                     pid, topics = mqtt.parse_subscribe(body)
                     for t, _ in topics:
@@ -212,7 +231,6 @@ class SC150Bridge:
                             if len(parts) > 1 and parts[1]:
                                 self.product_id = parts[1]
                     sock.sendall(mqtt.build_suback(pid, [min(q, 2) for _, q in topics]))
-                    _log.info("Box sottoscritta a: %s", [t for t, _ in topics])
                 elif ptype == mqtt.PT_PINGREQ:
                     sock.sendall(mqtt.build_pingresp())
                 elif ptype == mqtt.PT_PUBLISH:
@@ -228,16 +246,14 @@ class SC150Bridge:
                         self.last_data.update(data)
                         self._save_cache()
                         _log.info(
-                            "<-- TELEMETRIA [%s]: mode=%s spd=%s flw=%s/%s m3/h T_out=%s°C T_in=%s°C",
+                            "<-- TELEMETRIA [%s]: mode=%s flw=%s/%s m3/h T_out=%s\u00b0C T_in=%s\u00b0C",
                             self.product_id,
                             self.last_data.get("current_mode"),
-                            self.last_data.get("set_spd"),
                             self.last_data.get("extf_flw"),
                             self.last_data.get("ffe_flw"),
                             self.last_data.get("outside_tpt"),
                             self.last_data.get("ext_tpt"),
                         )
-                        _log.info(self.last_data)
                         self.publish_telemetry(self.last_data)
                 elif ptype == mqtt.PT_PUBREL:
                     pid = struct.unpack_from(">H", body)[0] if len(body) >= 2 else 0
@@ -272,52 +288,44 @@ class SC150Bridge:
     def publish_discovery(self):
         dev = {
             "identifiers": ["aldes_inspirair_sc150"],
-            "name": "Aldes InspirAIR Home SC150",
+            "name": self.tr.get("device_name", "Aldes InspirAIR Home SC150"),
             "manufacturer": "Aldes",
             "model": "InspirAIR Home SC150",
         }
         if self.last_data.get("Vers_UC") or self.last_data.get("Vers_W"):
             dev["sw_version"] = f"UC {self.last_data.get('Vers_UC', '?')} / Wi-Fi {self.last_data.get('Vers_W', '?')}"
 
-        # Rimozione automatica eventuali entita residue della vecchia T.ONE
-        old_topics = [
+        # Rimozione automatica entitÃ  obsolete (fan, mode_z, rssi disattivato)
+        obsolete_topics = [
             "homeassistant/climate/aldes/config",
             "homeassistant/water_heater/aldes_ballon/config",
+            "homeassistant/fan/aldes_sc150/config",
             "homeassistant/number/aldes_people/config",
-            "homeassistant/date/vacation_start/config",
-            "homeassistant/date/vacation_end/config",
-            "homeassistant/switch/vacation_enable/config",
+            "homeassistant/button/aldes_sc150_mode_z/config",
         ]
-        for ot in old_topics:
+        for ot in obsolete_topics:
             self._ha_pub(ot, "")
 
-        # 1. Entita FAN nativa Home Assistant
-        fan_cfg = {
-            "name": "VMC InspirAIR SC150",
-            "unique_id": "aldes_sc150_fan",
+        # 1. EntitÃ  SELECT principale per le modalitÃ  VMC (V, Y, X, W)
+        select_cfg = {
+            "name": self.tr.get("select_mode_name", "Modalit\u00e0 VMC"),
+            "unique_id": "aldes_sc150_mode_select",
             "device": dev,
-            "state_topic": f"{self.prefix}/state/fan/state",
-            "command_topic": f"{self.prefix}/set/fan/state",
-            "payload_on": "ON",
-            "payload_off": "OFF",
-            "percentage_state_topic": f"{self.prefix}/state/fan/speed",
-            "percentage_command_topic": f"{self.prefix}/set/fan/speed",
-            "speed_range_min": 1,
-            "speed_range_max": 4,
-            "preset_modes": list(VMC_CODE_TO_PRESET.values()),
-            "preset_mode_state_topic": f"{self.prefix}/state/fan/preset",
-            "preset_mode_command_topic": f"{self.prefix}/set/fan/preset",
+            "state_topic": f"{self.prefix}/state/select/mode",
+            "command_topic": f"{self.prefix}/set/select/mode",
+            "options": list(self.vmc_modes.values()),
             "availability_topic": f"{self.prefix}/state/available",
-            "icon": "mdi:fan",
+            "icon": "mdi:air-filter",
         }
-        self._ha_pub("homeassistant/fan/aldes_sc150/config", json.dumps(fan_cfg, ensure_ascii=False))
+        self._ha_pub("homeassistant/select/aldes_sc150_mode/config", json.dumps(select_cfg, ensure_ascii=False))
 
-        # 2. Pulsanti test modalita V, X, Y, Z
+        # 2. Pulsanti rapidi modalitÃ 
+        btn_tr = self.tr.get("buttons", {})
         buttons = [
-            ("mode_v", "Modalita Quotidiano (Codice V)", "mdi:home-clock"),
-            ("mode_x", "Test Modalita X (Boost / Ospiti)", "mdi:fan-chevron-up"),
-            ("mode_y", "Test Modalita Y (Ospiti / Boost)", "mdi:account-multiple-plus"),
-            ("mode_z", "Modalita Programmazione (Codice Z)", "mdi:calendar-clock"),
+            ("mode_v", btn_tr.get("mode_v", "Modalit\u00e0 Quotidiano (V)"), "mdi:home-clock"),
+            ("mode_y", btn_tr.get("mode_y", "Modalit\u00e0 Cucina (Y)"), "mdi:silverware-fork-knife"),
+            ("mode_x", btn_tr.get("mode_x", "Modalit\u00e0 Boost (X)"), "mdi:fan-chevron-up"),
+            ("mode_w", btn_tr.get("mode_w", "Modalit\u00e0 Vacanze (W)"), "mdi:beach"),
         ]
         for bid, bname, bicon in buttons:
             bcfg = {
@@ -331,10 +339,16 @@ class SC150Bridge:
             }
             self._ha_pub(f"homeassistant/button/aldes_sc150_{bid}/config", json.dumps(bcfg, ensure_ascii=False))
 
-        # 3. Sensori telemetria SC150 (15 attivi + 8 a zero disabilitati di default)
-        for suf, key, name, unit, dclass, sclass, icon, en, _ in SENSORS:
+        # 3. Sensori telemetria SC150 con nomi letti da translations/<lang>.json
+        sens_tr = self.tr.get("sensors", {})
+        for suf, key, unit, dclass, sclass, icon, en, _, active in SENSORS_SPEC:
+            topic_cfg = f"homeassistant/sensor/sc150_{suf}/config"
+            if not active:
+                # Se active=False (es. RSSI), invia payload vuoto per rimuoverlo da HA
+                self._ha_pub(topic_cfg, "")
+                continue
             scfg = {
-                "name": name,
+                "name": sens_tr.get(suf, suf),
                 "unique_id": f"aldes_sc150_{suf}",
                 "state_topic": f"{self.prefix}/state/sensor/{key}",
                 "device": dev,
@@ -348,11 +362,11 @@ class SC150Bridge:
                 scfg["device_class"] = dclass
             if sclass:
                 scfg["state_class"] = sclass
-            self._ha_pub(f"homeassistant/sensor/sc150_{suf}/config", json.dumps(scfg, ensure_ascii=False))
+            self._ha_pub(topic_cfg, json.dumps(scfg, ensure_ascii=False))
 
         # 4. Binary sensor stato connessione Box
         bconn = {
-            "name": "Connessione Connect Box",
+            "name": self.tr.get("box_connected_name", "Connessione Connect Box"),
             "unique_id": "aldes_sc150_box_connected",
             "state_topic": f"{self.prefix}/health/box_connected",
             "payload_on": "true",
@@ -368,7 +382,9 @@ class SC150Bridge:
         self._ha_pub(f"{self.prefix}/health/box_connected", "true" if self.box_connected else "false")
 
     def publish_telemetry(self, data):
-        for _, key, _, _, _, _, _, _, is_float in SENSORS:
+        for _, key, _, _, _, _, _, is_float, active in SENSORS_SPEC:
+            if not active:
+                continue
             if key in data and data[key] is not None:
                 val = data[key]
                 if is_float is True:
@@ -383,32 +399,11 @@ class SC150Bridge:
                         pass
                 self._ha_pub(f"{self.prefix}/state/sensor/{key}", str(val).strip())
 
-        self._ha_pub(f"{self.prefix}/state/fan/state", "ON")
         cm = str(data.get("current_mode") or "").strip().upper()
-        if cm:
-            self._ha_pub(f"{self.prefix}/state/fan/preset", VMC_CODE_TO_PRESET.get(cm, cm))
-        if "set_spd" in data and data["set_spd"] is not None:
-            try:
-                spd = max(1, min(3, int(round(float(data["set_spd"])))))
-                self._ha_pub(f"{self.prefix}/state/fan/speed", {1: "33", 2: "66", 3: "100"}[spd])
-            except Exception:
-                pass
-        # Forza sempre lo stato della ventola a ON quando arriva la telemetria
-        self._ha_pub(f"{self.prefix}/state/fan/state", "ON")
-
-        # Sincronizza il preset attivo (V, X, Y, W, Z)
-        cm = str(data.get("current_mode") or "").strip().upper()
-        if cm:
-            self._ha_pub(f"{self.prefix}/state/fan/preset", VMC_CODE_TO_PRESET.get(cm, cm))
-
-        # Sincronizza la velocità in percentuale (33, 66, 100)
-        if "set_spd" in data and data["set_spd"] is not None:
-            try:
-                spd = max(1, min(3, int(round(float(data["set_spd"])))))
-                pct_map = {1: "33", 2: "66", 3: "100"}
-                self._ha_pub(f"{self.prefix}/state/fan/speed", pct_map[spd])
-            except Exception:
-                pass
+        if cm in self.vmc_modes:
+            self._ha_pub(f"{self.prefix}/state/select/mode", self.vmc_modes[cm])
+        elif cm in self.all_vmc_codes:
+            _log.info("Modalita VMC attiva '%s' (%s) gestita a codice ma non esposta nella select", cm, self.all_vmc_codes[cm])
 
     def _apply_mode(self, code):
         code = code.strip().upper()
@@ -418,33 +413,25 @@ class SC150Bridge:
             self.send_to_box("changeMode", ["W", now_s, end_s])
         else:
             self.send_to_box("changeMode", [code])
-        self._ha_pub(f"{self.prefix}/state/fan/preset", VMC_CODE_TO_PRESET.get(code, code))
+        if code in self.vmc_modes:
+            self._ha_pub(f"{self.prefix}/state/select/mode", self.vmc_modes[code])
         self._ha_pub(f"{self.prefix}/state/sensor/current_mode", code)
-        self._ha_pub(f"{self.prefix}/state/fan/state", "ON")
 
     def _handle_ha_cmd(self, topic, payload):
         p = payload.strip()
         _log.info("Comando ricevuto da HA [%s]: %s", topic, p)
-        if topic.endswith("/button/mode_v") or topic.endswith("/fan/state"):
-            self._apply_mode("V")
-        elif topic.endswith("/button/mode_x"):
-            self._apply_mode("X")
-        elif topic.endswith("/button/mode_y"):
-            self._apply_mode("Y")
-        elif topic.endswith("/button/mode_z"):
-            self._apply_mode("Z")
-        elif topic.endswith("/fan/preset"):
-            code = VMC_PRESET_TO_CODE.get(p.lower())
+        if topic.endswith("/select/mode"):
+            code = self.vmc_mode_to_code.get(p.lower())
             if code:
                 self._apply_mode(code)
-        elif topic.endswith("/fan/speed"):
-            try:
-                v = float(p)
-                code, pct = ("V", "33") if v <= 34 else (("Y", "66") if v <= 67 else ("X", "100"))
-                self._apply_mode(code)
-                self._ha_pub(f"{self.prefix}/state/fan/speed", pct)
-            except ValueError:
-                pass
+        elif topic.endswith("/button/mode_v"):
+            self._apply_mode("V")
+        elif topic.endswith("/button/mode_y"):
+            self._apply_mode("Y")
+        elif topic.endswith("/button/mode_x"):
+            self._apply_mode("X")
+        elif topic.endswith("/button/mode_w"):
+            self._apply_mode("W")
 
     def run_ha_mqtt(self):
         host, port, user, pw = detect_mqtt_broker()
@@ -469,7 +456,7 @@ class SC150Bridge:
                 pkt = reader.read_packet()
                 if not pkt or pkt[0] != mqtt.PT_CONNACK or (len(pkt[3]) > 2 and pkt[3][2] != 0):
                     rc = pkt[3][2] if (pkt and len(pkt[3]) > 2) else -1
-                    _log.error("CONNACK rifiutato da Mosquitto (rc=%d). Verifica utente/password MQTT.", rc)
+                    _log.error("CONNACK rifiutato da Mosquitto (rc=%d).", rc)
                     s.close()
                     time.sleep(5)
                     continue
@@ -479,7 +466,7 @@ class SC150Bridge:
                 self.publish_discovery()
                 if self.last_data:
                     self.publish_telemetry(self.last_data)
-                _log.info("Connesso a Mosquitto: Auto-Discovery SC150 pubblicata!")
+                _log.info("Connesso a Mosquitto: Auto-Discovery Select SC150 pubblicata!")
                 last_ping = time.time()
                 while True:
                     try:
@@ -509,7 +496,8 @@ class SC150Bridge:
 
 def main():
     port = int(os.environ.get("MQTT_PORT", "18883"))
-    bridge = SC150Bridge(listen_port=port)
+    lang = (os.environ.get("ALDES_LANG") or "it").strip()
+    bridge = SC150Bridge(listen_port=port, lang=lang)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
     threading.Thread(target=bridge.run_box_listener, daemon=True).start()

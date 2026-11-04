@@ -1,6 +1,6 @@
 ---
 name: Aldes Bridge SC150
-version: "2.0.4"
+version: "2.1.0"
 slug: aldes-bridge
 description: Bridge MQTT/TLS locale nativo per VMC Aldes InspirAIR Home SC150
 url: https://github.com/David-PLC/aldes-bridge-sc150
@@ -9,9 +9,9 @@ arch:
   - amd64
   - aarch64
 init: false
+apparmor: true
 host_network: true
 hassio_api: true
-hassio_role: "manager"
 services:
   - mqtt:want
 privileged:
@@ -23,6 +23,7 @@ map:
 options:
   mqtt_port: 18883
   box_ip: ""
+  language: "it"
   ha_mqtt_host: ""
   ha_mqtt_port: 1883
   ha_mqtt_user: ""
@@ -30,6 +31,7 @@ options:
 schema:
   mqtt_port: int
   box_ip: str
+  language: str
   ha_mqtt_host: str
   ha_mqtt_port: int
   ha_mqtt_user: str

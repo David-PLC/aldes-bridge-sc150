@@ -1,0 +1,23 @@
+---
+configuration:
+  mqtt_port:
+    name: Porta interna MQTT/TLS
+    description: Porta locale su cui il bridge ascolta la Aldes Connect Box (default 18883, redirige 8883 -> 18883).
+  box_ip:
+    name: Indirizzo IP Aldes Connect Box (opzionale)
+    description: Se specificato, restringe la regola iptables solo ai pacchetti provenienti dall'IP della Connect Box.
+  language:
+    name: Lingua etichette sensori
+    description: Codice lingua del file JSON in translations/ usato per dare i nomi alle entit\u00e0 (default it).
+  ha_mqtt_host:
+    name: Host Broker MQTT (opzionale)
+    description: Lascia vuoto per usare il rilevamento automatico tramite Supervisor (core-mosquitto).
+  ha_mqtt_port:
+    name: Porta Broker MQTT
+    description: Porta TCP del broker MQTT di Home Assistant (default 1883).
+  ha_mqtt_user:
+    name: Utente MQTT (opzionale)
+    description: Lascia vuoto per usare le credenziali automatiche del Supervisor, oppure inserisci l'utente Mosquitto.
+  ha_mqtt_password:
+    name: Password MQTT (opzionale)
+    description: Lascia vuoto per usare le credenziali automatiche del Supervisor, oppure inserisci la password Mosquitto.

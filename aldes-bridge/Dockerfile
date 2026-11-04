@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip install --no-cache-dir cryptography
 
 COPY server/ ./server/
+COPY translations/ ./translations/
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
