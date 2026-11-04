@@ -21,7 +21,7 @@ def test_load_profile_default():
     p = load_profile()
     assert p is not None
     assert p.id == "inspirair-sc150"
-    assert p.name == "TONE AquaAIR"
+    assert p.name == "InspirAIR Home SC150"
     assert p.type == "pac"
 
 def test_load_profile_by_id():

@@ -296,7 +296,7 @@ def test_api_profile_set():
     port, _, _ = _start_web(state)
     r = _req(port, "/api/profile", "PUT", {"profile_id": "inspirair-sc150"})
     assert r["profile"]["id"] == "inspirair-sc150"
-    assert r["profile"]["name"] == "TONE AquaAIR"
+    assert r["profile"]["name"] == "InspirAIR Home SC150"
     assert len(r["profile"]["air_modes_clim"]) == 5
     assert len(r["profile"]["air_modes_heat"]) == 5
 
