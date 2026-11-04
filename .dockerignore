@@ -1,8 +1,0 @@
-# Contexte de build : exclure ce qui n'est pas necessaire (ou secret).
-.git
-logs/
-web/node_modules
-web/dist
-__pycache__/
-*.pyc
-.pytest_cache/

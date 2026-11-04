@@ -1,47 +1,15 @@
-# Stage 1 : build del frontend React dalla tua repo GitHub
-FROM node:20-alpine AS web
-ARG CACHEBUST=v0.20.1
-RUN echo "Cache bust: $CACHEBUST" && date
-RUN apk add --no-cache git
-RUN git clone --depth 1 --branch main https://github.com/David-PLC/aldes-bridge-sc150.git /src
-WORKDIR /src/web
-RUN npm ci --no-audit --no-fund && npm run build
-
-# Stage 2 : runtime python
 FROM python:3.11-slim
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
-ENV ALDES_WEB_DIR=/app/dist
-ENV ALDES_ADDON_VERSION=v0.20.1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
-    net-tools \
-    build-essential \
-    python3-dev \
-    libffi-dev \
+    python3-cryptography \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=web /src/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y --auto-remove build-essential python3-dev libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=web /src/server/ ./server/
-COPY --from=web /src/profiles/ ./profiles/
-COPY --from=web /src/web/dist ./dist
-
-RUN mkdir -p /config/aldes
-
+COPY server/ ./server/
 COPY run.sh /run.sh
 RUN chmod +x /run.sh
 
-EXPOSE 18883 8080
-
-ENV ALDES_CONFIG_FILE=/config/aldes/config.json
-ENV ALDES_TELEMETRY_FILE=/config/aldes/telemetry.json
-ENV ALDES_HISTORY_FILE=/config/aldes/history.db
-ENV ALDES_PROFILE_FILE=/config/aldes/profile.json
-ENV ALDES_CONSIGNE_FILE=/config/aldes/consigne.json
-
+EXPOSE 18883
 ENTRYPOINT ["/run.sh"]
