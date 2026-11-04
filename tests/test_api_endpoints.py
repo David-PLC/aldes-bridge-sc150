@@ -294,8 +294,8 @@ def test_api_profile_set():
     from server.device_profile import load_profile
     state = AppState("h", 8883, EventBus())
     port, _, _ = _start_web(state)
-    r = _req(port, "/api/profile", "PUT", {"profile_id": "tone-aquaair"})
-    assert r["profile"]["id"] == "tone-aquaair"
+    r = _req(port, "/api/profile", "PUT", {"profile_id": "inspirair-sc150"})
+    assert r["profile"]["id"] == "inspirair-sc150"
     assert r["profile"]["name"] == "TONE AquaAIR"
     assert len(r["profile"]["air_modes_clim"]) == 5
     assert len(r["profile"]["air_modes_heat"]) == 5
@@ -318,7 +318,7 @@ def test_api_profiles_list():
     assert "profiles" in r
     assert len(r["profiles"]) >= 1
     ids = [p["id"] for p in r["profiles"]]
-    assert "tone-aquaair" in ids
+    assert "inspirair-sc150" in ids
 
 
 # --- Config ---

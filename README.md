@@ -190,7 +190,7 @@ server/
   device_profile.py  # chargeur de profils YAML (DeviceProfile, load_profile)
   aldes.py       # mapping telemetrie → indicateurs Aldes
 profiles/        # profils device (YAML)
-  tone-aquaair.yaml  # profil TONE AquaAIR (PAC air-air)
+  inspirair-sc150.yaml  # profil TONE AquaAIR (PAC air-air)
 web/             # frontend React/Vite
 tests/           # tests pytest
 Dockerfile
@@ -269,7 +269,7 @@ Variables d'environnement (`docker-compose.yml`) :
 |---|---|---|
 | `ALDES_MODE` | `bridge` | Mode initial (proxy/bridge) |
 | `ALDES_HISTORY_DAYS` | `90` | Rétention SQLite (jours) |
-| `ALDES_PROFILE` | `tone-aquaair` | Profil device à charger |
+| `ALDES_PROFILE` | `inspirair-sc150` | Profil device à charger |
 
 ### Kubernetes / K3s
 
@@ -416,7 +416,7 @@ sudo docker compose up -d --build
 | POST | `/api/clear` | vide l'historique affiché |
 | GET | `/api/profiles` | liste des profils disponibles (id, name, type, file) |
 | GET | `/api/profile` | profil actuellement chargé |
-| PUT | `/api/profile` | `{"profile_id":"tone-aquaair"}` — change le profil à la volée |
+| PUT | `/api/profile` | `{"profile_id":"inspirair-sc150"}` — change le profil à la volée |
 | GET | `/api/settings` | paramètres (rétention historique, taille max logs) |
 | PUT | `/api/settings` | `{"history_retention_days":30, "log_retention_max_bytes":...}` — met à jour |
 | GET | `/` | SPA (frontend construit) |
@@ -465,7 +465,7 @@ Un profil décrit les modes, commandes et le mapping telemetrie d'un appareil sp
 
 | ID | Appareil | Type | Description |
 |---|---|---|---|
-| `tone-aquaair` | TONE AquaAIR | PAC air-air | Profil par défaut, 9 modes air, 3 modes eau, 5 commandes |
+| `inspirair-sc150` | TONE AquaAIR | PAC air-air | Profil par défaut, 9 modes air, 3 modes eau, 5 commandes |
 
 **API profils** :
 
@@ -473,7 +473,7 @@ Un profil décrit les modes, commandes et le mapping telemetrie d'un appareil sp
 |---|---|---|
 | GET | `/api/profiles` | liste des profils disponibles (id, name, type, file) |
 | GET | `/api/profile` | profil actuellement chargé |
-| PUT | `/api/profile` | `{"profile_id":"tone-aquaair"}` — change le profil à la volée |
+| PUT | `/api/profile` | `{"profile_id":"inspirair-sc150"}` — change le profil à la volée |
 
 **Sélecteur UI** : un dropdown « Appareil » dans l'en-tête permet de changer de profil
 sans redémarrer le conteneur. Le profil sélectionné influence les modes affichés,

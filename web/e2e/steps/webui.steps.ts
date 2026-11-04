@@ -324,7 +324,7 @@ Then('le sélecteur de profil est visible', async ({ page }) => {
 Then('le profil sélectionné est {texte}', async ({ page }, name: string) => {
   const select = page.locator('.profileSelect, select').filter({ hasText: name }).first()
   await expect(select).toBeVisible({ timeout: 10000 })
-  await expect(select).toHaveValue(/tone-aquaair/)
+  await expect(select).toHaveValue(/inspirair-sc150/)
 })
 
 Then('le profil {texte} est actif côté API', async ({ page }, profileId: string) => {

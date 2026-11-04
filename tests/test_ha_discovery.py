@@ -51,7 +51,7 @@ def test_aldes_to_ha_preset_mapping():
 def test_ha_to_aldes_preset_mapping():
     from server.ha import mode_mappings
     from server.device_profile import load_profile
-    profile = load_profile("tone-aquaair")
+    profile = load_profile("inspirair-sc150")
     mode_mappings.rebuild_from_profile(profile)
     assert mode_mappings.HA_PRESET_TO_ALDES["Éco"] == "C"
     assert mode_mappings.HA_PRESET_TO_ALDES["Confort"] == "B"
@@ -77,7 +77,7 @@ def test_build_discovery_config_topics():
 
 
 def test_build_discovery_config_climate_valid():
-    profile = load_profile("tone-aquaair")
+    profile = load_profile("inspirair-sc150")
     configs = _build_discovery_config("dev123", profile)
     climate_topic = None
     climate_payload = None
@@ -111,7 +111,7 @@ def test_build_discovery_config_climate_valid():
 # --- Tests filtrage presets par famille (issue #67) ---
 
 def test_build_discovery_presets_filtered_cooling():
-    profile = load_profile("tone-aquaair")
+    profile = load_profile("inspirair-sc150")
     configs = _build_discovery_config("dev123", profile, data={"UAM": 5})
     for topic, payload_str in configs:
         if "climate" in topic and payload_str:
@@ -124,7 +124,7 @@ def test_build_discovery_presets_filtered_cooling():
 
 
 def test_build_discovery_presets_filtered_heating():
-    profile = load_profile("tone-aquaair")
+    profile = load_profile("inspirair-sc150")
     configs = _build_discovery_config("dev123", profile, data={"UAM": 1})
     for topic, payload_str in configs:
         if "climate" in topic and payload_str:
@@ -137,7 +137,7 @@ def test_build_discovery_presets_filtered_heating():
 
 
 def test_build_discovery_presets_union_when_off():
-    profile = load_profile("tone-aquaair")
+    profile = load_profile("inspirair-sc150")
     configs = _build_discovery_config("dev123", profile, data={"UAM": 0})
     for topic, payload_str in configs:
         if "climate" in topic and payload_str:
@@ -153,7 +153,7 @@ def test_build_discovery_presets_union_when_off():
 def test_preset_confort_resolves_by_current_family():
     events = EventBus()
     state = AppState("127.0.0.1", 8883, events)
-    state.profile = load_profile("tone-aquaair")
+    state.profile = load_profile("inspirair-sc150")
     injected = []
     state._ha_inject_hook = lambda topic, payload, qos: injected.append(json.loads(payload))
     client = HADiscoveryClient(state, dry_run=False)
@@ -353,7 +353,7 @@ def test_get_water_mode_code_invalid():
 # --- Tests des configs ECS et vacances ---
 
 def test_build_discovery_config_has_water_heater():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     wh_topic = None
     for topic, payload_str in configs:
         if "water_heater" in topic:
@@ -369,7 +369,7 @@ def test_build_discovery_config_has_water_heater():
 
 
 def test_build_discovery_config_has_dhw_sensors():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     topics = {topic for topic, _ in configs}
     assert any("dhw_level" in t for t in topics), "dhw_level sensor manquant"
     assert any("dhw_temp_bottom" in t for t in topics), "dhw_temp_bottom sensor manquant"
@@ -377,7 +377,7 @@ def test_build_discovery_config_has_dhw_sensors():
 
 
 def test_water_heater_config_fields():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "water_heater" in topic:
             payload = json.loads(payload_str)
@@ -396,14 +396,14 @@ def test_water_heater_config_fields():
 
 
 def test_no_select_ecs_in_discovery():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, _ in configs:
         assert "select" not in topic or "ecs" not in topic, \
             f"L'ancien select ecs ne devrait plus exister: {topic}"
 
 
 def test_dhw_level_sensor_config():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "dhw_level" in topic:
             payload = json.loads(payload_str)
@@ -419,7 +419,7 @@ def test_dhw_level_sensor_config():
 
 
 def test_dhw_temp_bottom_sensor_config():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "dhw_temp_bottom" in topic:
             payload = json.loads(payload_str)
@@ -433,7 +433,7 @@ def test_dhw_temp_bottom_sensor_config():
 
 
 def test_dhw_temp_top_sensor_config():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "dhw_temp_top" in topic:
             payload = json.loads(payload_str)
@@ -446,7 +446,7 @@ def test_dhw_temp_top_sensor_config():
 
 
 def test_water_heater_uses_profile_labels():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "water_heater" in topic:
             payload = json.loads(payload_str)
@@ -458,7 +458,7 @@ def test_water_heater_uses_profile_labels():
 def test_ecs_command_all_modes():
     events = EventBus()
     state = AppState("127.0.0.1", 8883, events)
-    state.profile = load_profile("tone-aquaair")
+    state.profile = load_profile("inspirair-sc150")
     injected = []
     state._ha_inject_hook = lambda topic, payload, qos: injected.append(json.loads(payload))
     client = HADiscoveryClient(state, dry_run=False)
@@ -509,7 +509,7 @@ def test_publish_telemetry_ecs_values():
 def test_profile_program_commands_are_converted_to_aldes_codes():
     events = EventBus()
     state = AppState("127.0.0.1", 8883, events)
-    state.profile = load_profile("tone-aquaair")
+    state.profile = load_profile("inspirair-sc150")
     injected = []
     state._ha_inject_hook = lambda topic, payload, qos: injected.append(json.loads(payload))
     client = HADiscoveryClient(state, dry_run=False)
@@ -835,7 +835,7 @@ def test_build_discovery_backward_compat_none():
 
 
 def test_build_discovery_config_has_antil_binary_sensor():
-    configs = _build_discovery_config("dev123", load_profile("tone-aquaair"))
+    configs = _build_discovery_config("dev123", load_profile("inspirair-sc150"))
     for topic, payload_str in configs:
         if "antil" in topic and "binary_sensor" in topic:
             payload = json.loads(payload_str)
@@ -1102,7 +1102,7 @@ def _spy_build_publish(monkeypatch):
 def _people_client(monkeypatch):
     events = EventBus()
     state = AppState("127.0.0.1", 8883, events)
-    state.profile = load_profile("tone-aquaair")
+    state.profile = load_profile("inspirair-sc150")
     injected = []
     state._ha_inject_hook = lambda topic, payload, qos: injected.append(json.loads(payload))
     client = HADiscoveryClient(state, dry_run=False)

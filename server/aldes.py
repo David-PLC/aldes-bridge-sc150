@@ -10,7 +10,7 @@ exact consomme par l'integration HA :
 
 Mapping de la telemetrie brute (payload PUBLISH boxward) vers le product :
     modemid     -> product["modem"]
-    productid   -> product["serial_number"]  (ex: "ABCDEF123456_TONE")
+    productid   -> product["serial_number"]
     MT0..MT9    -> thermostats CurrentTemperature
     UsC0..UsC9  -> thermostats TemperatureSet
     UAM (0..8)  -> indicator.current_air_mode ("A".."I")
@@ -55,7 +55,7 @@ FRIENDLY_NAMES = {
 }
 
 # Modes air tels qu'ordonnes par l'app (TOneMode): index = valeur UAM.
-# A=Off, F=Air Confort (labels dans profiles/tone-aquaair.yaml)
+# A=Off, F=Air Confort (labels dans profiles/inspirair-sc150.yaml)
 AIR_MODES = ["A", "B", "C", "D", "E", "F", "G", "H", "I"]
 # Modes eau chaude sanitaire (index = valeur UDM).
 WATER_MODES = ["L", "M", "N"]

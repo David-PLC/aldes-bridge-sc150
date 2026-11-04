@@ -13,8 +13,8 @@ services:
       - ALDES_MODE=bridge
       # rétention de l'historisation SQLite des valeurs (jours) ; la base vit dans logs/ (volume monté)
       - ALDES_HISTORY_DAYS=90
-      # profil device (tone-aquaair par défaut)
-      - ALDES_PROFILE=tone-aquaair
+      # profil device (inspirair-sc150 par défaut)
+      - ALDES_PROFILE=inspirair-sc150
       # Home Assistant MQTT Auto-Discovery
       - HA_MQTT_ENABLED=true
       # IP du broker Mosquitto (add-on HA) depuis le host network

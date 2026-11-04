@@ -12,6 +12,6 @@ Fonctionnalité: Sélecteur de profil device
     Étant donné le mode du bridge est à proxy
     Et le bridge sert la WebUI construite
     Quand j'ouvre la page d'accueil
-    Et je change le profil pour « tone-aquaair »
+    Et je change le profil pour « inspirair-sc150 »
     Alors le profil sélectionné est « TONE AquaAIR »
-    Et le profil « tone-aquaair » est actif côté API
+    Et le profil « inspirair-sc150 » est actif côté API

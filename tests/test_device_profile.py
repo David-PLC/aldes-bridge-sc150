@@ -20,14 +20,14 @@ import json
 def test_load_profile_default():
     p = load_profile()
     assert p is not None
-    assert p.id == "tone-aquaair"
+    assert p.id == "inspirair-sc150"
     assert p.name == "TONE AquaAIR"
     assert p.type == "pac"
 
 def test_load_profile_by_id():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p is not None
-    assert p.id == "tone-aquaair"
+    assert p.id == "inspirair-sc150"
 
 def test_load_profile_not_found():
     assert load_profile("nonexistent") is None
@@ -35,16 +35,16 @@ def test_load_profile_not_found():
 def test_list_profiles():
     profiles = list_profiles()
     assert len(profiles) >= 1
-    assert any(p["id"] == "tone-aquaair" for p in profiles)
+    assert any(p["id"] == "inspirair-sc150" for p in profiles)
 
 def test_profile_products():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert "TONE_AQUA_AIR" in p.products
     assert "TONE_AIR" in p.products
     assert p.products["TONE_AQUA_AIR"]["name"] == "T.One\u00ae AquaAIR"
 
 def test_profile_air_modes():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p.air_modes_clim == [
         {"index": 0, "code": "A", "label": "Off"},
         {"index": 5, "code": "F", "label": "Confort"},
@@ -61,7 +61,7 @@ def test_profile_air_modes():
     ]
 
 def test_profile_water_modes():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p.water_modes == [
         {"index": 0, "code": "L", "label": "Off"},
         {"index": 1, "code": "M", "label": "On"},
@@ -69,27 +69,27 @@ def test_profile_water_modes():
     ]
 
 def test_get_air_mode_label():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p.get_air_mode_label("A") == "Off"
     assert p.get_air_mode_label("F") == "Confort"
     assert p.get_air_mode_label("Z") == "Z"
 
 def test_get_water_mode_label():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p.get_water_mode_label("L") == "Off"
     assert p.get_water_mode_label("M") == "On"
     assert p.get_water_mode_label("N") == "Boost"
 
 def test_resolve_reference():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     assert p.resolve_reference({"NED": 75, "UDM": 2}) == "TONE_AQUA_AIR"
     assert p.resolve_reference({"NED": 75}) == "TONE_AIR"
     assert p.resolve_reference({}) == "TONE_AIR"
 
 def test_to_dict():
-    p = load_profile("tone-aquaair")
+    p = load_profile("inspirair-sc150")
     d = p.to_dict()
-    assert d["id"] == "tone-aquaair"
+    assert d["id"] == "inspirair-sc150"
     assert "air_modes" in d
     assert "water_modes" in d
     assert "commands" in d
@@ -156,10 +156,10 @@ def test_appstate_profile_none_by_default():
 
 def test_appstate_profile_in_snapshot():
     state = AppState("h", 8883, EventBus())
-    state.profile = load_profile("tone-aquaair")
+    state.profile = load_profile("inspirair-sc150")
     snap = state.snapshot()
     assert "profile" in snap
-    assert snap["profile"]["id"] == "tone-aquaair"
+    assert snap["profile"]["id"] == "inspirair-sc150"
 
 def test_custom_profile_from_yaml():
     data = {
@@ -206,9 +206,9 @@ def test_persist_profile_set():
         path = f.name
     try:
         state = AppState("h", 8883, EventBus(), profile_file=path)
-        p = load_profile("tone-aquaair")
+        p = load_profile("inspirair-sc150")
         state.set_profile(p)
-        assert read_persisted_profile(path) == "tone-aquaair"
+        assert read_persisted_profile(path) == "inspirair-sc150"
     finally:
         os.unlink(path)
 
@@ -217,9 +217,9 @@ def test_persist_profile_change():
         path = f.name
     try:
         state = AppState("h", 8883, EventBus(), profile_file=path)
-        p = load_profile("tone-aquaair")
+        p = load_profile("inspirair-sc150")
         state.set_profile(p)
-        assert read_persisted_profile(path) == "tone-aquaair"
+        assert read_persisted_profile(path) == "inspirair-sc150"
         state.set_profile(None)
         assert read_persisted_profile(path) is None
     finally:

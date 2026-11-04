@@ -180,7 +180,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/).
 ### Ajouté
 - **HA Discovery** : entité `water_heater` pour le ballon d'eau chaude (remplacement du `select ecs_mode`)
   - Opérations : Off (L) / On (M) / Boost (N)
-  - Labels lus depuis le profil device (`tone-aquaair`)
+  - Labels lus depuis le profil device (`inspirair-sc150`)
 - **HA Discovery** : capteurs ECS — Niveau ECS (`NED` %), Ballon Bas (`TBBa` °C), Ballon Haut (`TBHa` °C)
 - **Tests** : 9 tests unitaires ajoutés pour la validation ECS (164/164 passent)
 
@@ -251,7 +251,7 @@ Format basé sur [Keep a Changelog](https://keepachangelog.com/).
 ## [0.7.0] — 2026-08-XX
 
 ### Ajouté
-- Profils device YAML (tone-aquaair)
+- Profils device YAML (inspirair-sc150)
 - Tests E2E avec Playwright
 - Déploiement Kubernetes (guide K3s)
 
