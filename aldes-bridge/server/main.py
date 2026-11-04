@@ -236,6 +236,7 @@ class SC150Bridge:
                             self.last_data.get("ffe_flw"),
                             self.last_data.get("outside_tpt"),
                             self.last_data.get("ext_tpt"),
+                            self.last_data
                         )
                         self.publish_telemetry(self.last_data)
                 elif ptype == mqtt.PT_PUBREL:
