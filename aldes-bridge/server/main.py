@@ -34,11 +34,11 @@ VMC_PRESET_TO_CODE = {v.lower(): k for k, v in VMC_CODE_TO_PRESET.items()}
 
 # (suffisso_id, chiave_json, nome, unita, device_class, state_class, icona, enabled_by_default, is_float)
 SENSORS = [
-    ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "Â°C", "temperature", "measurement", "mdi:thermometer", True, True),
-    ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "Â°C", "temperature", "measurement", "mdi:home-thermometer", True, True),
-    ("reject_tpt", "reject_tpt", "Temperatura Aria Espulsa", "Â°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True),
-    ("extf_flw", "extf_flw", "Portata Estrazione", "mÂ³/h", None, "measurement", "mdi:weather-windy", True, False),
-    ("ffe_flw", "ffe_flw", "Portata Insufflazione", "mÂ³/h", None, "measurement", "mdi:air-filter", True, False),
+    ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "°C", "temperature", "measurement", "mdi:thermometer", True, True),
+    ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "°C", "temperature", "measurement", "mdi:home-thermometer", True, True),
+    ("reject_tpt", "reject_tpt", "Temperatura Aria Espulsa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True),
+    ("extf_flw", "extf_flw", "Portata Estrazione", "m³/h", None, "measurement", "mdi:weather-windy", True, False),
+    ("ffe_flw", "ffe_flw", "Portata Insufflazione", "m³/h", None, "measurement", "mdi:air-filter", True, False),
     ("extf_spd", "extf_spd", "Velocita Ventola Estrazione", "rpm", None, "measurement", "mdi:fan", True, False),
     ("vi_spd", "vi_spd", "Velocita Ventola Insufflazione", "rpm", None, "measurement", "mdi:fan", True, False),
     ("set_spd", "set_spd", "Livello Velocita VMC", None, None, "measurement", "mdi:speedometer", True, False),
