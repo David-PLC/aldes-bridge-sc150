@@ -4,8 +4,8 @@ ENV PYTHONUNBUFFERED=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iptables \
-    python3-cryptography \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir cryptography
 
 COPY server/ ./server/
 COPY run.sh /run.sh
