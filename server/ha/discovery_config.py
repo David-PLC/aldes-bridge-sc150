@@ -192,7 +192,7 @@ def build_vmc_discovery_config(device_id, profile, prefix="aldes", data=None):
         "device": device_info,
         "state_topic": f"{prefix}/state/fan/state",
         "command_topic": f"{prefix}/set/fan/state",
-        " payload_on": "ON",
+        "payload_on": "ON",
         "payload_off": "OFF",
         "percentage_state_topic": f"{prefix}/state/fan/speed",
         "percentage_command_topic": f"{prefix}/set/fan/speed",
