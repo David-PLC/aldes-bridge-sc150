@@ -303,7 +303,7 @@ class SC150Bridge:
             "percentage_state_topic": f"{self.prefix}/state/fan/speed",
             "percentage_command_topic": f"{self.prefix}/set/fan/speed",
             "speed_range_min": 1,
-            "speed_range_max": 3,
+            "speed_range_max": 4,
             "preset_modes": list(VMC_CODE_TO_PRESET.values()),
             "preset_mode_state_topic": f"{self.prefix}/state/fan/preset",
             "preset_mode_command_topic": f"{self.prefix}/set/fan/preset",
@@ -391,6 +391,22 @@ class SC150Bridge:
             try:
                 spd = max(1, min(3, int(round(float(data["set_spd"])))))
                 self._ha_pub(f"{self.prefix}/state/fan/speed", {1: "33", 2: "66", 3: "100"}[spd])
+            except Exception:
+                pass
+        # Forza sempre lo stato della ventola a ON quando arriva la telemetria
+        self._ha_pub(f"{self.prefix}/state/fan/state", "ON")
+
+        # Sincronizza il preset attivo (V, X, Y, W, Z)
+        cm = str(data.get("current_mode") or "").strip().upper()
+        if cm:
+            self._ha_pub(f"{self.prefix}/state/fan/preset", VMC_CODE_TO_PRESET.get(cm, cm))
+
+        # Sincronizza la velocità in percentuale (33, 66, 100)
+        if "set_spd" in data and data["set_spd"] is not None:
+            try:
+                spd = max(1, min(3, int(round(float(data["set_spd"])))))
+                pct_map = {1: "33", 2: "66", 3: "100"}
+                self._ha_pub(f"{self.prefix}/state/fan/speed", pct_map[spd])
             except Exception:
                 pass
 
