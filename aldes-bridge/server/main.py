@@ -36,25 +36,25 @@ VMC_PRESET_TO_CODE = {v.lower(): k for k, v in VMC_CODE_TO_PRESET.items()}
 SENSORS = [
     ("outside_tpt", "outside_tpt", "Temperatura Aria Esterna", "°C", "temperature", "measurement", "mdi:thermometer", True, True),
     ("ext_tpt", "ext_tpt", "Temperatura Aria Estratta", "°C", "temperature", "measurement", "mdi:home-thermometer", True, True),
-    ("reject_tpt", "reject_tpt", "Temperatura Aria Espulsa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True),
+    ("reject_tpt", "reject_tpt", "Temperatura Aria Reimmessa", "°C", "temperature", "measurement", "mdi:thermometer-chevron-down", True, True),
     ("extf_flw", "extf_flw", "Portata Estrazione", "m³/h", None, "measurement", "mdi:weather-windy", True, False),
-    ("ffe_flw", "ffe_flw", "Portata Insufflazione", "m³/h", None, "measurement", "mdi:air-filter", True, False),
+    ("ffe_flw", "ffe_flw", "Portata Immissione", "m³/h", None, "measurement", "mdi:air-filter", True, False),
     ("extf_spd", "extf_spd", "Velocita Ventola Estrazione", "rpm", None, "measurement", "mdi:fan", True, False),
-    ("vi_spd", "vi_spd", "Velocita Ventola Insufflazione", "rpm", None, "measurement", "mdi:fan", True, False),
+    ("vi_spd", "vi_spd", "Velocita Ventola Immissione", "rpm", None, "measurement", "mdi:fan", True, False),
     ("set_spd", "set_spd", "Livello Velocita VMC", None, None, "measurement", "mdi:speedometer", True, False),
     ("current_mode", "current_mode", "Codice Modalita Attiva", None, None, None, "mdi:tune", True, None),
     ("ff_cpt", "ff_cpt", "Contatore Usura Filtro", "d", None, "measurement", "mdi:air-filter", True, False),
     ("dep_ind", "dep_ind", "Indice Depressione Filtri", None, None, "measurement", "mdi:gauge", True, False),
     ("dtb_ind", "dtb_ind", "Stato Bypass", None, None, "measurement", "mdi:valve", True, False),
-    ("rssi", "RSSI", "Segnale Wi-Fi Box", None, None, None, "mdi:wifi", True, None),
     ("vers_uc", "Vers_UC", "Versione Firmware UC", None, None, None, "mdi:chip", True, False),
     ("vers_w", "Vers_W", "Versione Firmware Wi-Fi", None, None, None, "mdi:wifi-cog", True, None),
     # Sensori a valore zero: creati ma disabilitati di default
+    ("rssi", "RSSI", "Segnale Wi-Fi Box", None, None, None, "mdi:wifi", False, None),
     ("co2_vmc", "Co2_vmc", "CO2 VMC", "ppm", "carbon_dioxide", "measurement", "mdi:molecule-co2", False, True),
     ("pm25_vmc", "Pm25_Vmc", "PM2.5 VMC", "Âµg/mÂ³", "pm25", "measurement", "mdi:blur", False, True),
     ("voc_vmc", "Voc_Vmc", "VOC VMC", "ppm", None, "measurement", "mdi:chemical-weapon", False, False),
     ("cve_csn", "cve_csn", "Consumo Ventola Estrazione", "W", "power", "measurement", "mdi:flash", False, False),
-    ("vi_csn", "vi_csn", "Consumo Ventola Insufflazione", "W", "power", "measurement", "mdi:flash", False, False),
+    ("vi_csn", "vi_csn", "Consumo Ventola Immissione", "W", "power", "measurement", "mdi:flash", False, False),
     ("tte_csn", "tte_csn", "Consumo Totale VMC", "W", "power", "measurement", "mdi:flash", False, False),
     ("echange_pwr", "echange_pwr", "Potenza Scambiatore", "W", "power", "measurement", "mdi:heat-wave", False, False),
 ]
@@ -228,7 +228,7 @@ class SC150Bridge:
                         self.last_data.update(data)
                         self._save_cache()
                         _log.info(
-                            "<-- TELEMETRIA [%s]: mode=%s spd=%s flw=%s/%s m3/h T_out=%sÂ°C T_in=%sÂ°C",
+                            "<-- TELEMETRIA [%s]: mode=%s spd=%s flw=%s/%s m3/h T_out=%s°C T_in=%s°C",
                             self.product_id,
                             self.last_data.get("current_mode"),
                             self.last_data.get("set_spd"),
@@ -330,7 +330,7 @@ class SC150Bridge:
             }
             self._ha_pub(f"homeassistant/button/aldes_sc150_{bid}/config", json.dumps(bcfg, ensure_ascii=False))
 
-        # 3. Sensori telemetria SC150 (15 attivi + 7 a zero disabilitati di default)
+        # 3. Sensori telemetria SC150 (15 attivi + 8 a zero disabilitati di default)
         for suf, key, name, unit, dclass, sclass, icon, en, _ in SENSORS:
             scfg = {
                 "name": name,
