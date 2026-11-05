@@ -177,25 +177,6 @@ def publish_homeassistant_discovery(bridge: "AldesBridge") -> None:
         json.dumps(connectivity_config, ensure_ascii=False),
     )
 
-    # 7. [TEST] Cursore numerico per testare il comando changeTemperatureReference (15-30 °C)
-    temp_ref_config = {
-        "name": translations.get("temp_ref_test_name", "Temperatura Riferimento (Test)"),
-        "unique_id": "aldes_sc150_temp_ref_test",
-        "device": device_info,
-        "state_topic": f"{prefix}/state/number/temp_ref",
-        "command_topic": f"{prefix}/set/number/temp_ref",
-        "min": 15,
-        "max": 30,
-        "step": 1,
-        "unit_of_measurement": "\u00b0C",
-        "icon": "mdi:thermometer-Auto",
-        "availability_topic": f"{prefix}/state/available",
-    }
-    bridge.publish_to_ha(
-        "homeassistant/number/aldes_sc150_temp_ref/config",
-        json.dumps(temp_ref_config, ensure_ascii=False),
-    )
-
     # Pubblica lo stato iniziale di disponibilita'
     bridge.publish_to_ha(f"{prefix}/state/available", "online")
     bridge.publish_to_ha(f"{prefix}/health/box_connected", "true" if bridge.box_connected else "false")

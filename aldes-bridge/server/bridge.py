@@ -276,7 +276,7 @@ class AldesBridge:
                     if connect_info.get("client_id"):
                         self.product_id = connect_info["client_id"]
                     keepalive = connect_info.get("keepalive", 60)
-                    tls_socket.settimeout(max(90, keepalive * 2))
+                    tls_socket.settimeout(max(660, keepalive * 3))
                     tls_socket.sendall(mqtt.build_connack(0))
 
                 elif packet_type == mqtt.PT_SUBSCRIBE:
@@ -303,7 +303,6 @@ class AldesBridge:
                         if telemetry_data.get("productid"):
                             self.product_id = telemetry_data["productid"]
                         self.last_telemetry.update(telemetry_data)
-                        _log.info("DUMP TELEMETRIA COMPLETA: %s", json.dumps(telemetry_data, ensure_ascii=False))
                         self._save_telemetry_cache()
                         _log.info(
                             "<-- TELEMETRIA [%s]: mode=%s flw=%s/%s m3/h T_out=%s\u00b0C T_in=%s\u00b0C ff_cpt=%s",
@@ -457,20 +456,6 @@ class AldesBridge:
             self.apply_operating_mode("X")
         elif topic.endswith("/button/mode_w"):
             self.apply_operating_mode("W")
-        elif topic.endswith("/number/temp_ref"):
-            self.apply_temperature_reference(clean_payload)
-
-    def apply_temperature_reference(self, temperature_value: str) -> None:
-        """[TEST] Invia il comando changeTemperatureReference alla Connect Box."""
-        try:
-            temp_int = int(round(float(temperature_value.strip())))
-        except ValueError:
-            _log.warning("Valore temperatura non valido: %s", temperature_value)
-            return
-
-        _log.info("==> [TEST BYPASS] Invio changeTemperatureReference con parametro [%d]", temp_int)
-        self.send_command_to_box("changeTemperatureReference", [temp_int])
-        self.publish_to_ha(f"{self.config.mqtt_prefix}/state/number/temp_ref", str(temp_int))
 
     def run_ha_mqtt_loop(self) -> None:
         """Mantiene attiva la connessione verso il broker Mosquitto di Home Assistant."""
