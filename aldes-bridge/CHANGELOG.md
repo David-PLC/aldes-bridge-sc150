@@ -2,6 +2,11 @@
 
 Tutte le modifiche rilevanti a **Aldes Bridge SC150** sono documentate in questo file.
 
+## [2.1.4] - 2026-11-05
+
+### Corretto
+- **Test locali**: aggiunto `test_local.py` per la verifica del codice prima del Push
+
 ## [2.1.3] - 2026-11-05
 
 ### Corretto
