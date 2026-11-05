@@ -2,6 +2,16 @@
 
 Tutte le modifiche rilevanti a **Aldes Bridge SC150** sono documentate in questo file.
 
+## [2.2.2] - 2026-11-05
+
+### Ottimizzato
+- **Timeout TLS del socket**: elevato il timeout di lettura del socket a **660 secondi (11 minuti)** all'interno del gestore di sessione (`server/bridge.py`), eliminando alla radice le disconnessioni periodiche per timeout causate dai ritardi del modulo Wi-Fi HF-LPB100.
+
+## [2.2.1] - 2026-11-05
+
+### Aggiunto
+- **Modifiche grafiche**: Aggiunta icona e logo
+
 ## [2.2.0] - 2026-11-05
 
 ### Aggiunto
