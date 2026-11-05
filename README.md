@@ -1,5 +1,9 @@
 # Aldes Bridge SC150 — Home Assistant Add-on
 
+> **⚠️ Disclaimer / Esclusione di Responsabilità**
+> Questo add-on è un progetto indipendente sviluppato a titolo amatoriale e open source. **Non sono in alcun modo affiliato, associato, autorizzato, sponsorizzato da, o ufficialmente collegato ad Aldes** (ni corp. o società collegate). 
+> L'utilizzo di questo software avviene a vostro esclusivo rischio. L'autore non si assume alcuna responsabilità per eventuali malfunzionamenti, blocchi, perdite di dati, danneggiamenti alla VMC Aldes InspirAIR Home SC150, alla Connect Box, all'impianto elettrico o all'installazione di Home Assistant derivanti dall'uso di questo add-on.
+
 Add-on nativo per **Home Assistant OS** che consente il controllo e il monitoraggio **100% locale** (senza alcuna dipendenza dal cloud Aldes o Microsoft Azure) della VMC a doppio flusso **Aldes InspirAIR Home SC150** equipaggiata con modulo **Aldes Connect Box**.
 
 ---
@@ -170,3 +174,9 @@ L'Add-on include un profilo **AppArmor** dedicato (`aldes-bridge/apparmor.txt`) 
   3. Scollega e ricollega l'alimentazione della Connect Box per forzare una riconnessione immediata (la box effettua tentativi con backoff progressivo quando perde il cloud).
 * **Errore `CONNACK rifiutato da Mosquitto (rc=4 o rc=5)` nei log**:
   * Inserisci manualmente un nome utente e una password validi di Home Assistant / Mosquitto nei campi `ha_mqtt_user` e `ha_mqtt_password` della scheda Configurazione dell'Add-on e riavvialo.
+
+##  🙏 Riconoscimenti e Ringraziamenti
+
+Questo progetto si ispira e riprende concetti chiave da precedenti sviluppi della community open source dedicati al mondo Aldes:
+* [saniho/aldes-bridge](https://github.com/saniho/aldes-bridge) — Per l'intuizione e l'analisi iniziale del protocollo di comunicazione TLS e della gestione dei messaggi MQTT con la Connect Box.
+* [Conedo95/aldes_vmc](https://github.com/Conedo95/aldes_vmc) — Per gli spunti e le logiche di scripting utilizzate come riferimento in alcune parti del progetto.
