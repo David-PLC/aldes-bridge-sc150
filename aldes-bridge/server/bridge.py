@@ -25,6 +25,10 @@ from .tls import server_context
 
 _log = logging.getLogger("aldes-sc150")
 
+# Pausa minima (in secondi) tra due comandi inviati alla Connect Box per non saturare la UART
+COMMAND_MIN_INTERVAL = 2.0
+# Tempo di attesa (in secondi) prima di verificare se la VMC ha recepito il cambio modalita'
+COMMAND_VERIFY_TIMEOUT = 15.0
 
 def extract_json_dict(raw_payload: bytes | str) -> Optional[dict[str, Any]]:
     """Estrae il dizionario JSON dal payload MQTT inviato dalla Connect Box."""
@@ -74,6 +78,12 @@ class AldesBridge:
         self.product_id: str = "98D8636921CA_AIR"
         self.rpc_command_id: int = 1
         self.box_packet_id: int = 1
+        
+        # Coda di invio e verifica automatica esecuzione comandi
+        self.send_lock = threading.Lock()
+        self.last_command_sent_at: float = 0.0
+        self.pending_mode_code: Optional[str] = None
+        self.verify_timer: Optional[threading.Timer] = None
 
         # Stato connessione verso il broker Mosquitto di Home Assistant
         self.ha_socket: Optional[socket.socket] = None
@@ -156,29 +166,61 @@ class AldesBridge:
     # -------------------------------------------------------------------------
 
     def send_command_to_box(self, method: str, params: list[Any]) -> None:
-        """Invia un comando JSON-RPC alla Connect Box tramite il socket TLS attivo."""
-        with self.box_lock:
-            self.rpc_command_id += 1
-            rpc_body = json.dumps(
-                {
-                    "id": self.rpc_command_id,
-                    "jsonrpc": "2.0",
-                    "method": method,
-                    "params": params,
-                },
-                ensure_ascii=False,
+        """Invia un comando JSON-RPC alla Connect Box rispettando la pausa minima di 2 secondi."""
+        with self.send_lock:
+            elapsed = time.monotonic() - self.last_command_sent_at
+            if self.last_command_sent_at > 0 and elapsed < COMMAND_MIN_INTERVAL:
+                wait_seconds = COMMAND_MIN_INTERVAL - elapsed
+                _log.debug("Comando ravvicinato: attendo %.1fs prima dell'invio...", wait_seconds)
+                time.sleep(wait_seconds)
+
+            with self.box_lock:
+                self.rpc_command_id += 1
+                rpc_body = json.dumps(
+                    {
+                        "id": self.rpc_command_id,
+                        "jsonrpc": "2.0",
+                        "method": method,
+                        "params": params,
+                    },
+                    ensure_ascii=False,
+                )
+                topic = f"devices/{self.product_id}/messages/devicebound"
+                if not self.box_socket:
+                    _log.warning("Comando NON inviato (Connect Box non connessa): %s", rpc_body)
+                    return
+                self.box_packet_id = (self.box_packet_id % 65530) + 1
+                packet = mqtt.build_publish(topic, rpc_body, qos=1, pkt_id=self.box_packet_id)
+                try:
+                    self.box_socket.sendall(packet)
+                    self.last_command_sent_at = time.monotonic()
+                    _log.info("--> COMANDO INVIATO ALLA BOX [%s]: %s", topic, rpc_body)
+                except Exception as exc:
+                    _log.error("Errore durante l'invio del comando alla Box: %s", exc)
+
+    def _cancel_verify_timer(self) -> None:
+        """Annulla il timer di verifica se il cambio modalita' e' gia' stato confermato."""
+        if self.verify_timer is not None:
+            self.verify_timer.cancel()
+            self.verify_timer = None
+
+    def _verify_mode_applied(self, expected_code: str, params: list[Any]) -> None:
+        """Controlla dopo 15s se la VMC ha cambiato modalita'; in caso contrario reinvia una volta."""
+        self.verify_timer = None
+        if self.pending_mode_code != expected_code:
+            return
+
+        actual_mode = str(self.last_telemetry.get("current_mode") or "").strip().upper()
+        self.pending_mode_code = None
+
+        if actual_mode != expected_code:
+            _log.warning(
+                "La VMC e' ancora in modalita' '%s' invece di '%s' dopo %.0fs: reinvio il comando...",
+                actual_mode or "?",
+                expected_code,
+                COMMAND_VERIFY_TIMEOUT,
             )
-            topic = f"devices/{self.product_id}/messages/devicebound"
-            if not self.box_socket:
-                _log.warning("Comando NON inviato (Connect Box non connessa): %s", rpc_body)
-                return
-            self.box_packet_id = (self.box_packet_id % 65530) + 1
-            packet = mqtt.build_publish(topic, rpc_body, qos=1, pkt_id=self.box_packet_id)
-            try:
-                self.box_socket.sendall(packet)
-                _log.info("--> COMANDO INVIATO ALLA BOX [%s]: %s", topic, rpc_body)
-            except Exception as exc:
-                _log.error("Errore durante l'invio del comando alla Box: %s", exc)
+            self.send_command_to_box("changeMode", params)
 
     def run_box_listener(self) -> None:
         """Accetta in ciclo continuo le connessioni TLS provenienti dalla Connect Box."""
@@ -261,6 +303,7 @@ class AldesBridge:
                         if telemetry_data.get("productid"):
                             self.product_id = telemetry_data["productid"]
                         self.last_telemetry.update(telemetry_data)
+                        _log.info("DUMP TELEMETRIA COMPLETA: %s", json.dumps(telemetry_data, ensure_ascii=False))
                         self._save_telemetry_cache()
                         _log.info(
                             "<-- TELEMETRIA [%s]: mode=%s flw=%s/%s m3/h T_out=%s\u00b0C T_in=%s\u00b0C ff_cpt=%s",
@@ -348,8 +391,12 @@ class AldesBridge:
             self.publish_to_ha(f"{prefix}/state/filter/filter_wear_percent", f"{filter_info.wear_percent:.1f}")
             self.publish_to_ha(f"{prefix}/state/filter/filter_last_reset", filter_info.last_reset.isoformat())
 
-        # 3. Sincronizza il selettore della modalita' VMC
+        # 3. Sincronizza il selettore della modalita' VMC e verifica eventuali comandi in sospeso
         current_mode = str(telemetry.get("current_mode") or "").strip().upper()
+        if self.pending_mode_code and current_mode == self.pending_mode_code:
+            _log.info("Verifica superata: la VMC ha confermato il passaggio alla modalita' '%s'", current_mode)
+            self._cancel_verify_timer()
+            self.pending_mode_code = None
         if current_mode in self.exposed_modes:
             self.publish_to_ha(f"{prefix}/state/select/mode", self.exposed_modes[current_mode])
         elif current_mode in self.all_known_modes:
@@ -360,20 +407,30 @@ class AldesBridge:
             )
 
     def apply_operating_mode(self, mode_code: str) -> None:
-        """Invia alla VMC la richiesta di cambio modalita' (V, Y, X oppure W).
-
-        Per la modalita' Vacanze ('W'), il protocollo Aldes richiede un'unica stringa
-        concatenata nel formato: "W" + data_inizio_UTC + "Z" + data_fine_UTC + "Z".
-        """
+        """Invia alla VMC la richiesta di cambio modalita' (V, Y, X oppure W) e ne verifica l'esito."""
         clean_code = mode_code.strip().upper()
         if clean_code == "W":
             start_utc = datetime.now(timezone.utc).replace(microsecond=0)
             end_utc = start_utc + timedelta(days=7)
             date_format = "%Y%m%d%H%M%S"
-            vacation_param = f"W{start_utc.strftime(date_format)}Z{end_utc.strftime(date_format)}Z"
-            self.send_command_to_box("changeMode", [vacation_param])
+            params = [f"W{start_utc.strftime(date_format)}Z{end_utc.strftime(date_format)}Z"]
         else:
-            self.send_command_to_box("changeMode", [clean_code])
+            params = [clean_code]
+
+        previous_mode = str(self.last_telemetry.get("current_mode") or "").strip().upper()
+        self._cancel_verify_timer()
+        self.send_command_to_box("changeMode", params)
+
+        # Avvia la verifica solo se stiamo cambiando verso una modalita' diversa da quella attuale
+        if previous_mode != clean_code:
+            self.pending_mode_code = clean_code
+            self.verify_timer = threading.Timer(
+                COMMAND_VERIFY_TIMEOUT,
+                self._verify_mode_applied,
+                args=(clean_code, params),
+            )
+            self.verify_timer.daemon = True
+            self.verify_timer.start()
 
         prefix = self.config.mqtt_prefix
         if clean_code in self.exposed_modes:
@@ -400,6 +457,20 @@ class AldesBridge:
             self.apply_operating_mode("X")
         elif topic.endswith("/button/mode_w"):
             self.apply_operating_mode("W")
+        elif topic.endswith("/number/temp_ref"):
+            self.apply_temperature_reference(clean_payload)
+
+    def apply_temperature_reference(self, temperature_value: str) -> None:
+        """[TEST] Invia il comando changeTemperatureReference alla Connect Box."""
+        try:
+            temp_int = int(round(float(temperature_value.strip())))
+        except ValueError:
+            _log.warning("Valore temperatura non valido: %s", temperature_value)
+            return
+
+        _log.info("==> [TEST BYPASS] Invio changeTemperatureReference con parametro [%d]", temp_int)
+        self.send_command_to_box("changeTemperatureReference", [temp_int])
+        self.publish_to_ha(f"{self.config.mqtt_prefix}/state/number/temp_ref", str(temp_int))
 
     def run_ha_mqtt_loop(self) -> None:
         """Mantiene attiva la connessione verso il broker Mosquitto di Home Assistant."""
