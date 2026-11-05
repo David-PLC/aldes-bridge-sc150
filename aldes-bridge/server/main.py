@@ -9,7 +9,7 @@ import sys
 import threading
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from . import __version__, mqtt
 from .tls import server_context
@@ -408,11 +408,14 @@ class SC150Bridge:
     def _apply_mode(self, code):
         code = code.strip().upper()
         if code == "W":
-            now_s = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%SZ")
-            end_s = datetime.fromtimestamp(time.time() + 7 * 86400, tz=timezone.utc).strftime("%Y%m%d%H%M%SZ")
-            self.send_to_box("changeMode", ["W", now_s, end_s])
+            start = datetime.now(timezone.utc).replace(microsecond=0)
+            end = start + timedelta(days=7)
+            fmt = "%Y%m%d%H%M%S"
+            param = f"W{start.strftime(fmt)}Z{end.strftime(fmt)}Z"
+            self.send_to_box("changeMode", [param])
         else:
             self.send_to_box("changeMode", [code])
+
         if code in self.vmc_modes:
             self._ha_pub(f"{self.prefix}/state/select/mode", self.vmc_modes[code])
         self._ha_pub(f"{self.prefix}/state/sensor/current_mode", code)
