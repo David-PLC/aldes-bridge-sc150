@@ -1,11 +1,13 @@
 #!/bin/bash
 export MQTT_PORT=18883
 export ALDES_LANG="it"
+export FILTER_MONTHS=6
 BOX_IP=""
 
 if [ -f /data/options.json ]; then
   export MQTT_PORT=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('mqtt_port', 18883))")
   export ALDES_LANG=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('language', 'it') or 'it')")
+  export FILTER_MONTHS=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('filter_months', 6) or 6)")
   BOX_IP=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('box_ip', ''))")
   export HA_MQTT_HOST=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('ha_mqtt_host', ''))")
   export HA_MQTT_PORT=$(python3 -c "import json; d=json.load(open('/data/options.json')); print(d.get('ha_mqtt_port', 1883))")

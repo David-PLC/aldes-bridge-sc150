@@ -1,2 +1,2 @@
 """Aldes InspirAIR Home SC150 MQTT/TLS Bridge."""
-__version__ = "2.1.4"
+__version__ = "2.2.0"

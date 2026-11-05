@@ -6,6 +6,9 @@ configuration:
   box_ip:
     name: Indirizzo IP Aldes Connect Box (opzionale)
     description: Se specificato, restringe la regola iptables solo ai pacchetti provenienti dall'IP della Connect Box.
+  filter_months:
+    name: Durata nominale filtri (mesi)
+    description: Durata prevista dei filtri in mesi (default 6 mesi = 180 giorni) per il calcolo dei giorni residui.
   language:
     name: Lingua etichette sensori
     description: Codice lingua del file JSON in translations/ usato per dare i nomi alle entit\u00e0 (default it).
