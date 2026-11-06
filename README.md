@@ -1,6 +1,6 @@
 # Aldes Bridge SC150 — Home Assistant Add-on
 
-> **⚠️ Disclaimer / Esclusione di Responsabilità**
+> **Disclaimer / Esclusione di Responsabilità**
 > Questo add-on è un progetto indipendente sviluppato a titolo amatoriale e open source. **Non sono in alcun modo affiliato, associato, autorizzato, sponsorizzato da, o ufficialmente collegato ad Aldes** (ni corp. o società collegate). 
 > L'utilizzo di questo software avviene a vostro esclusivo rischio. L'autore non si assume alcuna responsabilità per eventuali malfunzionamenti, blocchi, perdite di dati, danneggiamenti alla VMC Aldes InspirAIR Home SC150, alla Connect Box, all'impianto elettrico o all'installazione di Home Assistant derivanti dall'uso di questo add-on.
 
@@ -175,7 +175,7 @@ L'Add-on include un profilo **AppArmor** dedicato (`aldes-bridge/apparmor.txt`) 
 * **Errore `CONNACK rifiutato da Mosquitto (rc=4 o rc=5)` nei log**:
   * Inserisci manualmente un nome utente e una password validi di Home Assistant / Mosquitto nei campi `ha_mqtt_user` e `ha_mqtt_password` della scheda Configurazione dell'Add-on e riavvialo.
 
-##  🙏 Riconoscimenti e Ringraziamenti
+##  Riconoscimenti e Ringraziamenti
 
 Questo progetto si ispira e riprende concetti chiave da precedenti sviluppi della community open source dedicati al mondo Aldes:
 * [saniho/aldes-bridge](https://github.com/saniho/aldes-bridge) — Per l'intuizione e l'analisi iniziale del protocollo di comunicazione TLS e della gestione dei messaggi MQTT con la Connect Box.
