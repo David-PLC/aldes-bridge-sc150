@@ -34,6 +34,7 @@ def publish_homeassistant_discovery(bridge: "AldesBridge") -> None:
         "homeassistant/water_heater/aldes_ballon/config",
         "homeassistant/fan/aldes_sc150/config",
         "homeassistant/number/aldes_people/config",
+        "homeassistant/number/aldes_sc150_temp_ref/config",
         "homeassistant/button/aldes_sc150_mode_z/config",
     ]
     for old_topic in obsolete_discovery_topics:
